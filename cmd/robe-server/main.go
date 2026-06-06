@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
 )
 
@@ -16,6 +20,9 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -25,11 +32,42 @@ func main() {
 		})
 	})
 
-	logger.Info("starting robe-server", "addr", cfg.HTTPAddr, "env", cfg.Env)
+	server := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: mux,
+	}
 
-	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
-		logger.Error("server stopped", "error", err)
-		os.Exit(1)
+	if cfg.TelegramBotToken != "" {
+		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, logger)
+		if err != nil {
+			logger.Error("failed to create telegram bot", "error", err)
+			os.Exit(1)
+		}
+
+		go func() {
+			if err := bot.Start(ctx); err != nil && err != context.Canceled {
+				logger.Error("telegram bot stopped", "error", err)
+			}
+		}()
+	} else {
+		logger.Warn("TELEGRAM_BOT_TOKEN is empty; telegram bot disabled")
+	}
+
+	go func() {
+		logger.Info("starting robe-server", "addr", cfg.HTTPAddr, "env", cfg.Env)
+
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("server stopped", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+
+	logger.Info("shutdown requested")
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		logger.Error("server shutdown failed", "error", err)
 	}
 }
 
