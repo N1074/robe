@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+
+data/
+secrets/
+*.db
+*.sqlite
+*.log
+
+bin/
+dist/
+tmp/
