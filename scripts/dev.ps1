@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("run", "google-auth", "build", "check", "fmt", "test", "vet", "health")]
+    [ValidateSet("run", "google-auth", "build", "check", "fmt", "test", "vet", "health", "db-up", "db-down", "db-logs", "db-psql")]
     [string]$Task
 )
 
@@ -36,5 +36,17 @@ switch ($Task) {
     }
     "health" {
         Invoke-RestMethod http://localhost:8080/health
+    }
+    "db-up" {
+        docker compose up -d robe-db
+    }
+    "db-down" {
+        docker compose down
+    }
+    "db-logs" {
+        docker compose logs -f robe-db
+    }
+    "db-psql" {
+        docker compose exec robe-db psql -U robe -d robe
     }
 }

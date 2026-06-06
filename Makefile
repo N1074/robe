@@ -1,4 +1,4 @@
-.PHONY: run google-auth build fmt test vet check health
+.PHONY: run google-auth build fmt test vet check health db-up db-down db-logs db-psql
 
 run:
 	go run ./cmd/robe-server
@@ -23,3 +23,15 @@ check: fmt test vet
 
 health:
 	curl -fsS http://localhost:8080/health
+
+db-up:
+	docker compose up -d robe-db
+
+db-down:
+	docker compose down
+
+db-logs:
+	docker compose logs -f robe-db
+
+db-psql:
+	docker compose exec robe-db psql -U robe -d robe

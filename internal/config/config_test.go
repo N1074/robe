@@ -112,3 +112,17 @@ func TestLoadSTTDefaults(t *testing.T) {
 		t.Fatalf("expected stt timeout 120, got %d", cfg.STTTimeoutSeconds)
 	}
 }
+
+func TestLoadMemoryDefaults(t *testing.T) {
+	t.Setenv("MEMORY_PROVIDER", "")
+	t.Setenv("DATABASE_URL", "")
+
+	cfg := Load()
+
+	if cfg.MemoryProvider != "" {
+		t.Fatalf("expected empty memory provider, got %q", cfg.MemoryProvider)
+	}
+	if cfg.DatabaseURL != "" {
+		t.Fatalf("expected empty database url, got %q", cfg.DatabaseURL)
+	}
+}

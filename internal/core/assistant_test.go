@@ -61,7 +61,7 @@ func TestHandleTextStatus(t *testing.T) {
 	}
 
 	want := "Robe v0.1 online.\nEnv: test\nLLM: ollama/qwen3:14b\nAccess: restricted"
-	want += "\nCalendar: disabled\nVoice: disabled\nTimezone: Local"
+	want += "\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nTimezone: Local"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -75,7 +75,7 @@ func TestHandleTextHelp(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	want := "Commands:\n/ping\n/status\n/ask <question>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>"
+	want := "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -129,8 +129,62 @@ func TestHandleTextStatusShowsSetupOpenAccess(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nVoice: disabled\nTimezone: Local"
+	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nTimezone: Local"
 	if got != want {
+		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
+func TestHandleTextRememberRequiresMemoryStore(t *testing.T) {
+	assistant := NewAssistant(nil, Status{})
+
+	got, err := assistant.HandleText(context.Background(), "/remember the dentist prefers mornings")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if got != memoryNotConfiguredMessage() {
+		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
+func TestHandleTextRememberStoresMemory(t *testing.T) {
+	memory := &mockMemoryStore{}
+	now := fixedTime(t, "2026-06-06T12:00:00+02:00")
+	assistant := NewAssistant(nil, Status{}, WithMemory(memory), WithNow(func() time.Time { return now }))
+
+	got, err := assistant.HandleText(context.Background(), "/remember the dentist prefers mornings")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "Memory saved:") || !strings.Contains(got, "the dentist prefers mornings") {
+		t.Fatalf("unexpected response: %q", got)
+	}
+	if len(memory.memories) != 1 {
+		t.Fatalf("expected 1 memory, got %d", len(memory.memories))
+	}
+}
+
+func TestHandleTextMemoriesSearchesMemory(t *testing.T) {
+	memory := &mockMemoryStore{
+		memories: []Memory{
+			{
+				ID:        "1",
+				Text:      "the dentist prefers mornings",
+				Source:    "telegram",
+				CreatedAt: fixedTime(t, "2026-06-06T12:00:00+02:00"),
+			},
+		},
+	}
+	assistant := NewAssistant(nil, Status{}, WithMemory(memory))
+
+	got, err := assistant.HandleText(context.Background(), "/memories dentist")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "Memories:") || !strings.Contains(got, "dentist") {
 		t.Fatalf("unexpected response: %q", got)
 	}
 }
@@ -368,6 +422,20 @@ type mockCalendar struct {
 	lastQuery    CalendarQuery
 	createdCount int
 	deletedID    string
+}
+
+type mockMemoryStore struct {
+	memories []Memory
+}
+
+func (m *mockMemoryStore) AddMemory(ctx context.Context, memory Memory) (Memory, error) {
+	memory.ID = "1"
+	m.memories = append(m.memories, memory)
+	return memory, nil
+}
+
+func (m *mockMemoryStore) SearchMemories(ctx context.Context, query string, limit int) ([]Memory, error) {
+	return m.memories, nil
 }
 
 func (m *mockCalendar) ListEvents(ctx context.Context, query CalendarQuery) ([]CalendarEvent, error) {

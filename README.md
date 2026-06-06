@@ -29,6 +29,7 @@ Implemented:
 - Google Calendar read/create/delete behind confirmation gates
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
+- manual local memory backed by Postgres
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
@@ -41,6 +42,7 @@ Planned:
 - TTS
 - mobile / glasses bridge
 - memory, project context and RAG
+- project context and RAG
 
 ## Architecture
 
@@ -75,6 +77,7 @@ Tool adapters:
 - Gmail read-only
 - web search
 - local storage
+- Postgres memory store
 
 ## Requirements
 
@@ -122,7 +125,28 @@ Example:
     STT_ARGS={audio}
     STT_TIMEOUT_SECONDS=120
 
+    MEMORY_PROVIDER=postgres
+    DATABASE_URL=postgres://robe:robe_dev_password@localhost:5432/robe?sslmode=disable
+
 `.env` must not be committed.
+
+## Local database
+
+Robe uses Postgres for local memory when `MEMORY_PROVIDER=postgres`.
+
+Start the database:
+
+    make db-up
+
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 db-up
+
+Useful database commands:
+
+    make db-logs
+    make db-psql
+    make db-down
 
 ## Google Calendar setup
 
@@ -179,6 +203,8 @@ Telegram commands:
 - `/ping`
 - `/status` shows environment, LLM provider/model and access mode
 - `/ask <question>`
+- `/remember <text>`
+- `/memories <query>`
 - `/calendar today`
 - `/calendar tomorrow`
 - `/calendar week`
@@ -242,6 +268,8 @@ Expected smoke tests:
 - `/ping` replies `pong`
 - `/help` lists the available commands
 - `/status` replies that Robe is online and shows env, LLM and access mode
+- `/remember the dentist prefers mornings` saves a memory when Postgres is configured
+- `/memories dentist` lists matching memories
 - voice message `crea una cita mañana a las 12 con el dentista` returns a heard transcript and a proposal token
 - `/calendar today` lists upcoming events with event IDs
 - `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
@@ -271,6 +299,13 @@ Current Calendar policy:
 - natural-language calendar create/delete also require `/confirm <token>`
 - voice calendar create/delete also require `/confirm <token>`
 - ambiguous confirmations such as "yes" are ignored
+
+Current Memory policy:
+
+- memories are saved only through explicit `/remember <text>`
+- memory search is explicit through `/memories <query>`
+- no automatic memory writes yet
+- project context and RAG should build on top of this storage layer, not inside Telegram
 
 ## Development roadmap
 
@@ -304,7 +339,7 @@ Voice input through local STT, TTS and mobile bridge.
 
 ### v0.7
 
-Memory, project context and retrieval-augmented context behind explicit storage/tool boundaries.
+Manual local memory with Postgres, followed by project context and retrieval-augmented context behind explicit storage/tool boundaries.
 
 ### Later
 

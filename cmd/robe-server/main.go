@@ -12,6 +12,7 @@ import (
 
 	calendaradapter "github.com/N1074/robe/internal/adapters/calendar"
 	"github.com/N1074/robe/internal/adapters/llm"
+	"github.com/N1074/robe/internal/adapters/storage"
 	"github.com/N1074/robe/internal/adapters/stt"
 	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
@@ -69,6 +70,20 @@ func main() {
 		logger.Warn("unsupported stt provider", "provider", cfg.STTProvider)
 	}
 
+	var memoryStore core.MemoryStore
+	if cfg.MemoryProvider == "postgres" {
+		store, err := storage.NewPostgresMemoryStore(ctx, cfg.DatabaseURL)
+		if err != nil {
+			logger.Error("failed to configure memory store", "error", err)
+		} else {
+			defer store.Close()
+			memoryStore = store
+			logger.Info("postgres memory configured")
+		}
+	} else if cfg.MemoryProvider != "" {
+		logger.Warn("unsupported memory provider", "provider", cfg.MemoryProvider)
+	}
+
 	assistant := core.NewAssistant(llmClient, core.Status{
 		Env:              cfg.Env,
 		LLMProvider:      cfg.LLMProvider,
@@ -76,8 +91,9 @@ func main() {
 		AccessRestricted: cfg.TelegramAllowedUserID != "",
 		CalendarEnabled:  calendarClient != nil,
 		VoiceEnabled:     transcribe != nil,
+		MemoryEnabled:    memoryStore != nil,
 		Timezone:         cfg.CalendarTimezone,
-	}, core.WithCalendar(calendarClient))
+	}, core.WithCalendar(calendarClient), core.WithMemory(memoryStore))
 
 	if cfg.TelegramBotToken != "" {
 		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, transcribe, logger)

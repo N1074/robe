@@ -33,6 +33,7 @@ The current intended version includes:
 - Google Calendar read/create/delete commands with explicit confirmation for writes
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
+- manual local memory backed by Postgres
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -108,6 +109,7 @@ Server smoke checks after `make run`:
 - Telegram voice message: `crea una cita mañana a las 12 con el dentista`
 - Telegram `/calendar delete <event_id>`
 - Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
+- Telegram `/remember <text>` and `/memories <query>`
 - Telegram `/ask responde solo OK`
 - confirm Telegram does not show model thinking text
 - confirm `/status` does not expose tokens or secrets
@@ -163,8 +165,12 @@ Useful Make targets:
 - `make google-auth`: create/update the local Google Calendar OAuth token
 - `make build`: build `bin/robe-server`
 - `make health`: call `http://localhost:8080/health`
+- `make db-up`: start local Postgres
+- `make db-down`: stop local Postgres
+- `make db-logs`: follow Postgres logs
+- `make db-psql`: open psql in the Postgres container
 
-On Windows PowerShell, `make` may not be installed and local script execution may be restricted. Use `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run`, `google-auth`, `check`, `build` or `health` as local equivalents. Keep `make` as the Ubuntu server workflow.
+On Windows PowerShell, `make` may not be installed and local script execution may be restricted. Use `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run`, `google-auth`, `check`, `build`, `health`, `db-up`, `db-down`, `db-logs` or `db-psql` as local equivalents. Keep `make` as the Ubuntu server workflow.
 
 Test coverage should scale with risk:
 
@@ -222,6 +228,7 @@ Planned adapters:
 - web search
 - local storage
 - local STT command adapter
+- Postgres memory store
 - STT/TTS
 - future mobile/glasses bridge
 
@@ -273,6 +280,7 @@ Current commands:
 - natural-language calendar create/list/delete intents parsed by the LLM
 - Telegram voice/audio messages transcribed to text before core handling
 - STT commands should print only the transcript on stdout; logs belong on stderr. Robe also filters common `whisper.cpp` log lines defensively.
+- `/remember <text>` stores manual memory; `/memories <query>` searches manual memory
 
 Core tests should continue to cover:
 
@@ -293,6 +301,8 @@ Core tests should continue to cover:
 - `/pending`
 - natural-language calendar create intent without execution
 - natural-language calendar list intent
+- `/remember` with mock MemoryStore
+- `/memories` with mock MemoryStore
 
 ## Important current warning
 
@@ -352,7 +362,8 @@ v0.6:
 
 v0.7:
 
-- memory, project context and RAG as core/tool/storage capabilities, not Telegram logic
+- manual local memory through Postgres
+- project context and RAG as core/tool/storage capabilities, not Telegram logic
 
 Later:
 

@@ -29,6 +29,9 @@ type Config struct {
 	STTCommand        string
 	STTArgs           []string
 	STTTimeoutSeconds int
+
+	MemoryProvider string
+	DatabaseURL    string
 }
 
 func Load() Config {
@@ -56,6 +59,9 @@ func Load() Config {
 		STTCommand:        os.Getenv("STT_COMMAND"),
 		STTArgs:           splitArgs(os.Getenv("STT_ARGS")),
 		STTTimeoutSeconds: getenvInt("STT_TIMEOUT_SECONDS", 120),
+
+		MemoryProvider: getenv("MEMORY_PROVIDER", ""),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
 	}
 }
 

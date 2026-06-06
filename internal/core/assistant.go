@@ -14,6 +14,7 @@ type Assistant struct {
 	llm             LLM
 	intentParser    IntentParser
 	calendar        Calendar
+	memory          MemoryStore
 	status          Status
 	location        *time.Location
 	pendingTTL      time.Duration
@@ -29,6 +30,7 @@ type Status struct {
 	AccessRestricted bool
 	CalendarEnabled  bool
 	VoiceEnabled     bool
+	MemoryEnabled    bool
 	Timezone         string
 }
 
@@ -74,6 +76,13 @@ func WithCalendar(calendar Calendar) AssistantOption {
 	}
 }
 
+func WithMemory(memory MemoryStore) AssistantOption {
+	return func(a *Assistant) {
+		a.memory = memory
+		a.status.MemoryEnabled = memory != nil
+	}
+}
+
 func WithIntentParser(parser IntentParser) AssistantOption {
 	return func(a *Assistant) {
 		a.intentParser = parser
@@ -110,13 +119,19 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Robe v0.1 online. Try /ping or /ask <question>.", nil
 
 	case text == "/help":
-		return "Commands:\n/ping\n/status\n/ask <question>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
+		return "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
 
 	case text == "/status":
 		return a.renderStatus(), nil
 
 	case text == "/ask" || strings.HasPrefix(text, "/ask "):
 		return a.handleAsk(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/ask")))
+
+	case text == "/remember" || strings.HasPrefix(text, "/remember "):
+		return a.handleRemember(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/remember")))
+
+	case text == "/memories" || strings.HasPrefix(text, "/memories "):
+		return a.handleMemories(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/memories")))
 
 	case text == "/calendar" || strings.HasPrefix(text, "/calendar "):
 		return a.handleCalendar(ctx, text)
@@ -166,12 +181,17 @@ func (a *Assistant) renderStatus() string {
 		voice = "enabled"
 	}
 
+	memory := "disabled"
+	if a.status.MemoryEnabled {
+		memory = "enabled"
+	}
+
 	timezone := strings.TrimSpace(a.status.Timezone)
 	if timezone == "" {
 		timezone = a.location.String()
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nTimezone: " + timezone
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {
