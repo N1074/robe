@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/N1074/robe/internal/adapters/llm"
 	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
 )
@@ -37,8 +38,10 @@ func main() {
 		Handler: mux,
 	}
 
+	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature)
+
 	if cfg.TelegramBotToken != "" {
-		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, logger)
+		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, llmClient.Ask, logger)
 		if err != nil {
 			logger.Error("failed to create telegram bot", "error", err)
 			os.Exit(1)

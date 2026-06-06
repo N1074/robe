@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -11,8 +12,12 @@ type Config struct {
 	HTTPAddr              string
 	TelegramBotToken      string
 	TelegramAllowedUserID string
-	OpenAIAPIKey          string
-	OpenAIModel           string
+
+	LLMProvider    string
+	LLMBaseURL     string
+	LLMModel       string
+	LLMNumPredict  int
+	LLMTemperature float64
 }
 
 func Load() Config {
@@ -23,8 +28,12 @@ func Load() Config {
 		HTTPAddr:              getenv("ROBE_HTTP_ADDR", ":8080"),
 		TelegramBotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramAllowedUserID: os.Getenv("TELEGRAM_ALLOWED_USER_ID"),
-		OpenAIAPIKey:          os.Getenv("OPENAI_API_KEY"),
-		OpenAIModel:           getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+
+		LLMProvider:    getenv("LLM_PROVIDER", "ollama"),
+		LLMBaseURL:     getenv("LLM_BASE_URL", "http://localhost:11434"),
+		LLMModel:       getenv("LLM_MODEL", "qwen3:14b"),
+		LLMNumPredict:  getenvInt("LLM_NUM_PREDICT", 512),
+		LLMTemperature: getenvFloat("LLM_TEMPERATURE", 0.2),
 	}
 }
 
@@ -34,6 +43,34 @@ func getenv(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getenvInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func getenvFloat(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }
 
 func loadDotEnv(path string) {
