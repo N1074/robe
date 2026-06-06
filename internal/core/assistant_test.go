@@ -143,8 +143,15 @@ func TestHandleTextCalendarDisabled(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if got != "Calendar is not configured." {
+	if got != calendarNotConfiguredMessage() {
 		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
+func TestCalendarNotConfiguredMessageIsActionable(t *testing.T) {
+	got := calendarNotConfiguredMessage()
+	if !strings.Contains(got, "CALENDAR_PROVIDER=google") || !strings.Contains(got, "Google OAuth") {
+		t.Fatalf("message is not actionable: %q", got)
 	}
 }
 

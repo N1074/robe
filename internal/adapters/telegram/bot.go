@@ -107,7 +107,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 	answer, err := b.handleText(requestCtx, text)
 	if err != nil {
 		b.logger.Error("assistant handle text failed", "error", err)
-		b.reply(message.Chat.ID, "LLM error: "+err.Error())
+		b.reply(message.Chat.ID, "I hit an internal error while handling that message.")
 		return
 	}
 
@@ -131,7 +131,7 @@ func (b *Bot) handleAudio(ctx context.Context, chatID int64, fileID string, ext 
 	transcript, err := b.transcribe(ctx, path)
 	if err != nil {
 		b.logger.Error("stt transcription failed", "error", err)
-		b.reply(chatID, "Voice error: "+err.Error())
+		b.reply(chatID, "I could not transcribe that voice message.")
 		return
 	}
 
@@ -144,7 +144,7 @@ func (b *Bot) handleAudio(ctx context.Context, chatID int64, fileID string, ext 
 	answer, err := b.handleText(ctx, transcript)
 	if err != nil {
 		b.logger.Error("assistant handle transcript failed", "error", err)
-		b.reply(chatID, "LLM error: "+err.Error())
+		b.reply(chatID, "I hit an internal error while handling that transcript.")
 		return
 	}
 

@@ -12,7 +12,7 @@ The repository is intended to become a maintainable orchestration layer for priv
 - future Gmail read-only integration
 - future web search integration
 - confirmation gates for sensitive actions
-- future voice/TTS/mobile/glasses bridge
+- voice/TTS/mobile/glasses bridge
 
 The project should remain simple, explicit and auditable. Avoid turning it into an opaque autonomous agent.
 
@@ -222,7 +222,7 @@ Planned adapters:
 - web search
 - local storage
 - local STT command adapter
-- future STT/TTS
+- STT/TTS
 - future mobile/glasses bridge
 
 ## Safety model
@@ -272,6 +272,7 @@ Current commands:
 - `/cancel <token>`
 - natural-language calendar create/list/delete intents parsed by the LLM
 - Telegram voice/audio messages transcribed to text before core handling
+- STT commands should print only the transcript on stdout; logs belong on stderr. Robe also filters common `whisper.cpp` log lines defensively.
 
 Core tests should continue to cover:
 

@@ -1,8 +1,10 @@
 package stt
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -39,12 +41,21 @@ func (t *CommandTranscriber) Transcribe(ctx context.Context, audioPath string) (
 	args := buildArgs(t.args, audioPath)
 	cmd := exec.CommandContext(ctx, t.command, args...)
 
-	output, err := cmd.CombinedOutput()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
-		return "", err
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s", err, detail)
 	}
 
-	transcript := strings.TrimSpace(string(output))
+	transcript := cleanTranscript(stdout.String())
 	if transcript == "" {
 		return "", errors.New("stt command returned empty transcript")
 	}
@@ -71,4 +82,41 @@ func buildArgs(args []string, audioPath string) []string {
 	}
 
 	return out
+}
+
+func cleanTranscript(output string) string {
+	lines := strings.Split(output, "\n")
+	kept := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || isSTTLogLine(line) {
+			continue
+		}
+
+		kept = append(kept, line)
+	}
+
+	return strings.TrimSpace(strings.Join(kept, " "))
+}
+
+func isSTTLogLine(line string) bool {
+	prefixes := []string{
+		"read_audio_data:",
+		"whisper_",
+		"whisper.",
+		"system_info:",
+		"main:",
+		"ggml_",
+		"common_",
+		"audio:",
+	}
+
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+
+	return false
 }

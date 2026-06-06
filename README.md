@@ -4,7 +4,7 @@ Robe is a local-first personal assistant service written in Go.
 
 The project is designed as a small orchestration layer for private assistant workflows: Telegram input, local LLM inference through Ollama, and future adapters for calendar, email, search, voice and visual context.
 
-Current status: **v0.1 development**.
+Current status: **v0.6 development**.
 
 ## Goals
 
@@ -40,6 +40,7 @@ Planned:
 - audit log
 - TTS
 - mobile / glasses bridge
+- memory, project context and RAG
 
 ## Architecture
 
@@ -57,7 +58,8 @@ Input adapters:
 
 - Telegram
 - HTTP / mobile
-- future voice / glasses bridge
+- voice through Telegram STT
+- future mobile / glasses bridge
 
 Core:
 
@@ -193,7 +195,13 @@ Natural language also works for supported calendar intents. For example:
 
 Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
 
-Voice messages and audio files sent to Telegram are transcribed first, then processed like normal text. The STT command must print the transcript to stdout. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted; if omitted, Robe appends the audio path as the final argument.
+Voice messages and audio files sent to Telegram are transcribed first, then processed like normal text. The STT command should print the transcript to stdout. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted; if omitted, Robe appends the audio path as the final argument. Robe filters common `whisper.cpp` log lines defensively, but a transcript-only wrapper is still preferred.
+
+For `whisper.cpp`, make the wrapper print only the transcript on stdout. Keep logs on stderr and use `-np -nt`:
+
+    /opt/ai/src/whisper.cpp/build/bin/whisper-cli -m /opt/ai/models/ggml-small.bin -f "$TMP_WAV" -l es -np -nt
+
+If Robe replies that Calendar is not configured yet, calendar OAuth/config is not active. Set `CALENDAR_PROVIDER=google`, credentials/token paths and restart Robe.
 
 ## Quality checks
 

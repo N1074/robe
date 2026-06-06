@@ -79,7 +79,7 @@ func (a *Assistant) handleIntent(ctx context.Context, intent Intent, originalTex
 
 func (a *Assistant) handleCalendarListIntent(ctx context.Context, period string) (string, error) {
 	if a.calendar == nil {
-		return "Calendar is not configured.", nil
+		return calendarNotConfiguredMessage(), nil
 	}
 
 	switch strings.TrimSpace(period) {

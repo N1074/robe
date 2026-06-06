@@ -114,7 +114,7 @@ func (s *pendingCalendarStore) list(now time.Time) []pendingCalendarAction {
 
 func (a *Assistant) handleCalendar(ctx context.Context, text string) (string, error) {
 	if a.calendar == nil {
-		return "Calendar is not configured.", nil
+		return calendarNotConfiguredMessage(), nil
 	}
 
 	arg := strings.TrimSpace(strings.TrimPrefix(text, "/calendar"))
@@ -192,7 +192,7 @@ func (a *Assistant) proposeCalendarCreate(input string) (string, error) {
 
 func (a *Assistant) proposeCalendarCreateDraft(draft CalendarEventDraft) (string, error) {
 	if a.calendar == nil {
-		return "Calendar is not configured.", nil
+		return calendarNotConfiguredMessage(), nil
 	}
 
 	draft.Title = strings.TrimSpace(draft.Title)
@@ -249,7 +249,7 @@ func (a *Assistant) proposeCalendarDelete(eventID string) (string, error) {
 
 func (a *Assistant) handleConfirm(ctx context.Context, token string) (string, error) {
 	if a.calendar == nil {
-		return "Calendar is not configured.", nil
+		return calendarNotConfiguredMessage(), nil
 	}
 
 	token = strings.TrimSpace(token)
@@ -427,6 +427,10 @@ func randomToken(prefix string) (string, error) {
 
 func calendarUsage() string {
 	return "Calendar commands:\n/calendar today\n/calendar tomorrow\n/calendar week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>"
+}
+
+func calendarNotConfiguredMessage() string {
+	return "Calendar is not configured yet. Set CALENDAR_PROVIDER=google and configure Google OAuth token files, then restart Robe."
 }
 
 func formatCreateProposal(action pendingCalendarAction) string {
