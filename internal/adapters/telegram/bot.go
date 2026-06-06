@@ -10,16 +10,16 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-type AskFunc func(ctx context.Context, prompt string) (string, error)
+type HandleTextFunc func(ctx context.Context, text string) (string, error)
 
 type Bot struct {
 	api           *tgbotapi.BotAPI
 	allowedUserID string
-	askFunc       AskFunc
+	handleText    HandleTextFunc
 	logger        *slog.Logger
 }
 
-func New(token string, allowedUserID string, askFunc AskFunc, logger *slog.Logger) (*Bot, error) {
+func New(token string, allowedUserID string, handleText HandleTextFunc, logger *slog.Logger) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ func New(token string, allowedUserID string, askFunc AskFunc, logger *slog.Logge
 	return &Bot{
 		api:           api,
 		allowedUserID: strings.TrimSpace(allowedUserID),
-		askFunc:       askFunc,
+		handleText:    handleText,
 		logger:        logger,
 	}, nil
 }
@@ -72,53 +72,24 @@ func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 		return
 	}
 
+	if b.handleText == nil {
+		b.reply(message.Chat.ID, "Assistant is not configured.")
+		return
+	}
+
 	text := strings.TrimSpace(message.Text)
 
-	switch {
-	case text == "/ping":
-		b.reply(message.Chat.ID, "pong")
-
-	case text == "/start":
-		b.reply(message.Chat.ID, "Robe v0.1 online. Try /ping or /ask <question>.")
-
-	case text == "/help":
-		b.reply(message.Chat.ID, "Commands:\n/ping\n/status\n/ask <question>")
-
-	case text == "/status":
-		b.reply(message.Chat.ID, "Robe v0.1 online.")
-
-	case strings.HasPrefix(text, "/ask "):
-		b.handleAsk(ctx, message.Chat.ID, strings.TrimSpace(strings.TrimPrefix(text, "/ask ")))
-
-	default:
-		b.reply(message.Chat.ID, "Unknown command. Try /help.")
-	}
-}
-
-func (b *Bot) handleAsk(parentCtx context.Context, chatID int64, prompt string) {
-	if b.askFunc == nil {
-		b.reply(chatID, "LLM is not configured.")
-		return
-	}
-
-	if prompt == "" {
-		b.reply(chatID, "Usage: /ask <question>")
-		return
-	}
-
-	b.reply(chatID, "Thinking...")
-
-	ctx, cancel := context.WithTimeout(parentCtx, 90*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	answer, err := b.askFunc(ctx, prompt)
+	answer, err := b.handleText(requestCtx, text)
 	if err != nil {
-		b.logger.Error("llm ask failed", "error", err)
-		b.reply(chatID, "LLM error: "+err.Error())
+		b.logger.Error("assistant handle text failed", "error", err)
+		b.reply(message.Chat.ID, "LLM error: "+err.Error())
 		return
 	}
 
-	b.reply(chatID, answer)
+	b.reply(message.Chat.ID, answer)
 }
 
 func (b *Bot) reply(chatID int64, text string) {

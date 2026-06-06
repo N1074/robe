@@ -12,6 +12,7 @@ import (
 	"github.com/N1074/robe/internal/adapters/llm"
 	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
+	"github.com/N1074/robe/internal/core"
 )
 
 func main() {
@@ -39,9 +40,10 @@ func main() {
 	}
 
 	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature)
+	assistant := core.NewAssistant(llmClient, "Robe v0.1 online.")
 
 	if cfg.TelegramBotToken != "" {
-		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, llmClient.Ask, logger)
+		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, logger)
 		if err != nil {
 			logger.Error("failed to create telegram bot", "error", err)
 			os.Exit(1)

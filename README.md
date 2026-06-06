@@ -23,11 +23,12 @@ Implemented:
 
 - HTTP server with `/health`
 - private Telegram bot adapter
+- command handling through `internal/core`
 - `/ping`, `/start`, `/help`, `/status`
 - `/ask <question>` using a local Ollama model
 - `.env` based configuration
 - basic project quality commands through `make`
-- initial config tests
+- config, core command and LLM response cleanup tests
 
 Planned:
 
@@ -42,11 +43,11 @@ Planned:
 
 ## Architecture
 
-Current v0.1 flow:
+Current flow:
 
-Telegram → Robe Go server → Telegram adapter → Ollama LLM adapter → Local model response → Telegram reply
+Telegram -> Robe Go server -> Telegram adapter -> core assistant -> Ollama LLM adapter -> Local model response -> Telegram reply
 
-Target architecture:
+Architecture:
 
 Input adapters:
 
@@ -56,8 +57,8 @@ Input adapters:
 
 Core:
 
-- session handling
 - command and intent routing
+- session handling
 - confirmation gate
 - audit logging
 
@@ -115,9 +116,17 @@ If `TELEGRAM_ALLOWED_USER_ID` is empty, Robe logs the detected Telegram user ID.
 
     make run
 
+Build a local binary:
+
+    make build
+
 Health check:
 
     curl http://localhost:8080/health
+
+Or, if the server is already running:
+
+    make health
 
 Telegram commands:
 
@@ -137,6 +146,34 @@ This runs:
 - `go test ./...`
 - `go vet ./...`
 
+For substantial changes, keep tests and documentation in step with the code:
+
+- update core tests when command behavior changes
+- add focused tests for LLM cleanup and safety-sensitive logic
+- update this README when setup, commands, architecture or roadmap changes
+- update `AGENTS.md` when workflow, safety assumptions or architecture direction changes
+
+## Server update checklist
+
+On the Ubuntu server:
+
+    cd /opt/ai/projects/robe
+    git pull --ff-only
+    make check
+    make run
+
+In another terminal, verify:
+
+    curl http://localhost:8080/health
+
+Expected smoke tests:
+
+- `/ping` replies `pong`
+- `/help` lists the available commands
+- `/status` replies that Robe is online
+- `/ask responde solo OK` returns a final answer without thinking text
+- an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
+
 ## Safety model
 
 Robe should not allow the LLM to directly execute sensitive actions.
@@ -154,6 +191,10 @@ The intended policy is:
 ### v0.1
 
 Local Telegram assistant using Ollama.
+
+### v0.1.1
+
+Thin Telegram adapter, core assistant command handling, core tests and LLM thinking cleanup.
 
 ### v0.2
 

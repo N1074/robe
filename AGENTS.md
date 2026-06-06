@@ -16,9 +16,9 @@ The repository is intended to become a maintainable orchestration layer for priv
 
 The project should remain simple, explicit and auditable. Avoid turning it into an opaque autonomous agent.
 
-## Current stable state
+## Current intended state
 
-The latest pushed stable version includes:
+The current intended version includes:
 
 - Go module: `github.com/N1074/robe`
 - HTTP server with `/health`
@@ -27,15 +27,16 @@ The latest pushed stable version includes:
 - private Telegram access using `TELEGRAM_ALLOWED_USER_ID`
 - `/start`, `/help`, `/ping`, `/status`
 - `/ask <question>`
+- command handling in `internal/core`
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
-- initial config tests
+- config, core command and LLM response cleanup tests
 - README with architecture and roadmap
 
 Current runtime flow:
 
-Telegram -> Robe Go server -> Telegram adapter -> Ollama LLM adapter -> qwen3:14b -> Telegram reply
+Telegram -> Robe Go server -> Telegram adapter -> core assistant -> Ollama LLM adapter -> qwen3:14b -> Telegram reply
 
 ## Local runtime environment
 
@@ -86,9 +87,47 @@ The server should be treated as runtime/staging, not as the primary IDE.
 Manual server workflow:
 
     cd /opt/ai/projects/robe
-    git pull
+    git pull --ff-only
     make check
     make run
+
+Server smoke checks after `make run`:
+
+- `curl http://localhost:8080/health`
+- Telegram `/ping`
+- Telegram `/help`
+- Telegram `/status`
+- Telegram `/ask responde solo OK`
+- confirm Telegram does not show model thinking text
+
+## Conservative development workflow
+
+Work conservatively and keep changes easy to review.
+
+Before changing code:
+
+- check `git status`
+- read the smallest relevant set of files first
+- identify whether the task is code, docs, tests or runtime/deployment
+- avoid unrelated refactors
+- preserve user or local changes unless explicitly told to discard them
+
+While working:
+
+- batch related file reads and searches where practical
+- avoid repeated broad scans after the code shape is understood
+- prefer targeted `rg`, `go test ./package`, and focused diffs during iteration
+- use full `make check` or equivalent before finishing substantial work
+- keep code simple, explicit and auditable
+
+Token efficiency matters. Prefer one good pass over several noisy passes. Group related investigation, implementation and verification steps so more time can be spent programming instead of re-reading the same context.
+
+At the end of any substantial task:
+
+- update `AGENTS.md` if workflow, architecture, safety model, runtime assumptions or roadmap changed
+- update `README.md` if user-facing behavior, setup, commands, architecture or roadmap changed
+- add or update tests for the behavior that changed
+- run the most appropriate checks and report exactly what passed
 
 ## Code quality rules
 
@@ -103,6 +142,19 @@ This runs:
 - gofmt
 - go test ./...
 - go vet ./...
+
+Useful Make targets:
+
+- `make run`: run the server in the foreground using local `.env`
+- `make build`: build `bin/robe-server`
+- `make health`: call `http://localhost:8080/health`
+
+Test coverage should scale with risk:
+
+- command behavior belongs in core unit tests
+- adapter behavior should be tested when parsing, filtering or transport-specific behavior changes
+- LLM response cleanup and safety-sensitive logic should have focused tests
+- future confirmation gates, tool execution and audit behavior must be tested before being treated as stable
 
 Avoid committing secrets.
 
@@ -177,17 +229,13 @@ Confirmation flow should eventually look like:
 
 Avoid accepting ambiguous confirmations like "yes" unless tied to a specific pending action.
 
-## Current refactor plan
+## Current core state
 
-Next desired refactor:
+Command handling now lives in `internal/core`.
 
-- create `internal/core`
-- move command handling out of Telegram
-- make Telegram call `core.Assistant.HandleText`
-- add unit tests for core command behavior
-- keep Telegram as a thin adapter
+Telegram calls `core.Assistant.HandleText` and should remain a thin transport adapter.
 
-Expected commands after refactor:
+Current commands:
 
 - `/start`
 - `/help`
@@ -195,7 +243,7 @@ Expected commands after refactor:
 - `/status`
 - `/ask <question>`
 
-Core tests should cover:
+Core tests should continue to cover:
 
 - empty message
 - unknown command
@@ -214,13 +262,15 @@ Before continuing from a new workflow, check:
 
     git status
 
-If the working tree contains broken WIP changes and they are not needed, restore to the latest pushed stable state before pulling or continuing:
+If the working tree contains broken WIP changes and they are not needed, inspect them before restoring anything. Do not remove `internal/core` if it is part of the current checked-out version.
+
+For old pre-core WIP only, the historical recovery command was:
 
     git restore cmd/robe-server/main.go internal/adapters/telegram/bot.go
     rm -rf internal/core
     make check
 
-Only do this if the WIP changes are intentionally being discarded.
+Only use destructive cleanup when the WIP changes are intentionally being discarded and the target stable version is known.
 
 ## Near-term roadmap
 
@@ -230,9 +280,10 @@ v0.1:
 
 v0.1.1:
 
-- refactor Telegram into thin adapter
-- introduce core assistant
-- add core tests
+- thin Telegram adapter
+- core assistant command handling
+- core command tests
+- LLM thinking cleanup tests
 - improve `/status`
 
 v0.2:

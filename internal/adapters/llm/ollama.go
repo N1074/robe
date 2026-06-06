@@ -82,12 +82,31 @@ func (c *OllamaClient) Ask(ctx context.Context, prompt string) (string, error) {
 		return "", err
 	}
 
-	content := strings.TrimSpace(out.Message.Content)
+	content := stripThinking(out.Message.Content)
 	if content == "" {
 		return "", errors.New("ollama returned empty content")
 	}
 
 	return content, nil
+}
+
+func stripThinking(content string) string {
+	content = strings.TrimSpace(content)
+
+	for {
+		start := strings.Index(content, "<think>")
+		if start == -1 {
+			return strings.TrimSpace(content)
+		}
+
+		end := strings.Index(content[start:], "</think>")
+		if end == -1 {
+			return strings.TrimSpace(content[:start])
+		}
+
+		end += start + len("</think>")
+		content = content[:start] + content[end:]
+	}
 }
 
 type chatRequest struct {
