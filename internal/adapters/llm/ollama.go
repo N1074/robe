@@ -28,7 +28,7 @@ func NewOllamaClient(baseURL string, model string, numPredict int, temperature f
 		numPredict:  numPredict,
 		temperature: temperature,
 		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
+			Timeout: 180 * time.Second,
 		},
 	}
 }
@@ -116,7 +116,7 @@ func (c *OllamaClient) ParseIntent(ctx context.Context, req core.IntentRequest) 
 		},
 		Stream: false,
 		Options: chatOptions{
-			NumPredict:  384,
+			NumPredict:  c.numPredict,
 			Temperature: 0,
 		},
 	}

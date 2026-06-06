@@ -68,7 +68,7 @@ Observed behavior:
 - qwen3:14b uses roughly 8.3 GB VRAM when loaded.
 - It may emit internal `thinking` before final content.
 - Low `num_predict` values can result in empty content because generation is consumed by thinking.
-- `LLM_NUM_PREDICT=512` is currently used to avoid empty responses.
+- `LLM_NUM_PREDICT=1024` is currently recommended to avoid empty responses, especially with intent parsing.
 - Telegram should only display final content, not thinking.
 
 Existing lighter model:

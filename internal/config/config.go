@@ -43,7 +43,7 @@ func Load() Config {
 		LLMProvider:    getenv("LLM_PROVIDER", "ollama"),
 		LLMBaseURL:     getenv("LLM_BASE_URL", "http://localhost:11434"),
 		LLMModel:       getenv("LLM_MODEL", "qwen3:14b"),
-		LLMNumPredict:  getenvInt("LLM_NUM_PREDICT", 512),
+		LLMNumPredict:  getenvInt("LLM_NUM_PREDICT", 1024),
 		LLMTemperature: getenvFloat("LLM_TEMPERATURE", 0.2),
 
 		CalendarProvider:        getenv("CALENDAR_PROVIDER", ""),
