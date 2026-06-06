@@ -18,6 +18,12 @@ type Config struct {
 	LLMModel       string
 	LLMNumPredict  int
 	LLMTemperature float64
+
+	CalendarProvider        string
+	CalendarID              string
+	CalendarCredentialsFile string
+	CalendarTokenFile       string
+	CalendarTimezone        string
 }
 
 func Load() Config {
@@ -34,6 +40,12 @@ func Load() Config {
 		LLMModel:       getenv("LLM_MODEL", "qwen3:14b"),
 		LLMNumPredict:  getenvInt("LLM_NUM_PREDICT", 512),
 		LLMTemperature: getenvFloat("LLM_TEMPERATURE", 0.2),
+
+		CalendarProvider:        getenv("CALENDAR_PROVIDER", ""),
+		CalendarID:              getenv("CALENDAR_ID", "primary"),
+		CalendarCredentialsFile: os.Getenv("CALENDAR_CREDENTIALS_FILE"),
+		CalendarTokenFile:       os.Getenv("CALENDAR_TOKEN_FILE"),
+		CalendarTimezone:        getenv("CALENDAR_TIMEZONE", "Europe/Madrid"),
 	}
 }
 

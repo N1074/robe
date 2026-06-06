@@ -8,10 +8,10 @@ The repository is intended to become a maintainable orchestration layer for priv
 
 - Telegram input/output
 - local LLM inference through Ollama
-- future Google Calendar integration
+- Google Calendar integration
 - future Gmail read-only integration
 - future web search integration
-- future confirmation gates for sensitive actions
+- confirmation gates for sensitive actions
 - future voice/TTS/mobile/glasses bridge
 
 The project should remain simple, explicit and auditable. Avoid turning it into an opaque autonomous agent.
@@ -21,6 +21,7 @@ The project should remain simple, explicit and auditable. Avoid turning it into 
 The current intended version includes:
 
 - Go module: `github.com/N1074/robe`
+- Go 1.25.8+
 - HTTP server with `/health`
 - `.env` based configuration
 - Telegram bot adapter
@@ -29,6 +30,7 @@ The current intended version includes:
 - `/ask <question>`
 - command handling in `internal/core`
 - `/status` reports env, LLM provider/model and Telegram access mode without secrets
+- Google Calendar read/create/delete commands with explicit confirmation for writes
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -98,6 +100,10 @@ Server smoke checks after `make run`:
 - Telegram `/ping`
 - Telegram `/help`
 - Telegram `/status`
+- Telegram `/calendar today`
+- Telegram `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15`
+- Telegram `/calendar delete <event_id>`
+- Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
 - Telegram `/ask responde solo OK`
 - confirm Telegram does not show model thinking text
 - confirm `/status` does not expose tokens or secrets
@@ -150,6 +156,7 @@ This runs:
 Useful Make targets:
 
 - `make run`: run the server in the foreground using local `.env`
+- `make google-auth`: create/update the local Google Calendar OAuth token
 - `make build`: build `bin/robe-server`
 - `make health`: call `http://localhost:8080/health`
 
@@ -223,7 +230,7 @@ Policy:
 - email sending requires confirmation
 - email deletion is not allowed in early versions
 - calendar event creation requires confirmation
-- calendar event deletion is not allowed in early versions
+- calendar event deletion requires confirmation
 - external posting requires confirmation
 - future tool executions should be auditable
 
@@ -246,6 +253,14 @@ Current commands:
 - `/ping`
 - `/status`
 - `/ask <question>`
+- `/calendar today`
+- `/calendar tomorrow`
+- `/calendar week`
+- `/calendar create <title> | <start> | <end> [| location] [| description]`
+- `/calendar delete <event_id>`
+- `/pending`
+- `/confirm <token>`
+- `/cancel <token>`
 
 Core tests should continue to cover:
 
@@ -258,6 +273,12 @@ Core tests should continue to cover:
 - `/ask` with empty prompt
 - `/ask` with mock LLM success
 - `/ask` with mock LLM error
+- calendar list with mock Calendar
+- calendar create proposal without execution
+- calendar delete proposal without execution
+- `/confirm <token>` execution
+- `/cancel <token>`
+- `/pending`
 
 ## Important current warning
 
@@ -293,11 +314,11 @@ v0.1.1:
 
 v0.2:
 
-- Google Calendar read-only
+- Google Calendar read commands
 
 v0.3:
 
-- Calendar event creation with confirmation gate
+- Calendar event creation and deletion with confirmation gate
 
 v0.4:
 

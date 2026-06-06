@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	calendaradapter "github.com/N1074/robe/internal/adapters/calendar"
 	"github.com/N1074/robe/internal/adapters/llm"
 	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
@@ -40,12 +41,31 @@ func main() {
 	}
 
 	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature)
+	var calendarClient core.Calendar
+	if cfg.CalendarProvider == "google" {
+		client, err := calendaradapter.NewGoogleCalendar(ctx, calendaradapter.GoogleConfig{
+			CredentialsFile: cfg.CalendarCredentialsFile,
+			TokenFile:       cfg.CalendarTokenFile,
+			CalendarID:      cfg.CalendarID,
+		})
+		if err != nil {
+			logger.Error("failed to configure google calendar", "error", err)
+		} else {
+			calendarClient = client
+			logger.Info("google calendar configured", "calendar_id", cfg.CalendarID)
+		}
+	} else if cfg.CalendarProvider != "" {
+		logger.Warn("unsupported calendar provider", "provider", cfg.CalendarProvider)
+	}
+
 	assistant := core.NewAssistant(llmClient, core.Status{
 		Env:              cfg.Env,
 		LLMProvider:      cfg.LLMProvider,
 		LLMModel:         cfg.LLMModel,
 		AccessRestricted: cfg.TelegramAllowedUserID != "",
-	})
+		CalendarEnabled:  calendarClient != nil,
+		Timezone:         cfg.CalendarTimezone,
+	}, core.WithCalendar(calendarClient))
 
 	if cfg.TelegramBotToken != "" {
 		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, logger)

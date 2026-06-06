@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 type LLM interface {
@@ -10,8 +11,14 @@ type LLM interface {
 }
 
 type Assistant struct {
-	llm    LLM
-	status Status
+	llm             LLM
+	calendar        Calendar
+	status          Status
+	location        *time.Location
+	pendingTTL      time.Duration
+	pendingCalendar *pendingCalendarStore
+	now             func() time.Time
+	tokenGenerator  func(prefix string) (string, error)
 }
 
 type Status struct {
@@ -19,12 +26,61 @@ type Status struct {
 	LLMProvider      string
 	LLMModel         string
 	AccessRestricted bool
+	CalendarEnabled  bool
+	Timezone         string
 }
 
-func NewAssistant(llm LLM, status Status) *Assistant {
-	return &Assistant{
-		llm:    llm,
-		status: status,
+type AssistantOption func(*Assistant)
+
+func NewAssistant(llm LLM, status Status, opts ...AssistantOption) *Assistant {
+	location := time.Local
+	if status.Timezone != "" {
+		if loaded, err := time.LoadLocation(status.Timezone); err == nil {
+			location = loaded
+		} else {
+			status.Timezone = location.String()
+		}
+	} else {
+		status.Timezone = location.String()
+	}
+
+	assistant := &Assistant{
+		llm:             llm,
+		status:          status,
+		location:        location,
+		pendingTTL:      10 * time.Minute,
+		pendingCalendar: newPendingCalendarStore(),
+		now:             func() time.Time { return time.Now().In(location) },
+		tokenGenerator:  randomToken,
+	}
+
+	for _, opt := range opts {
+		opt(assistant)
+	}
+
+	return assistant
+}
+
+func WithCalendar(calendar Calendar) AssistantOption {
+	return func(a *Assistant) {
+		a.calendar = calendar
+		a.status.CalendarEnabled = calendar != nil
+	}
+}
+
+func WithNow(now func() time.Time) AssistantOption {
+	return func(a *Assistant) {
+		if now != nil {
+			a.now = now
+		}
+	}
+}
+
+func WithTokenGenerator(generator func(prefix string) (string, error)) AssistantOption {
+	return func(a *Assistant) {
+		if generator != nil {
+			a.tokenGenerator = generator
+		}
 	}
 }
 
@@ -39,13 +95,25 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Robe v0.1 online. Try /ping or /ask <question>.", nil
 
 	case text == "/help":
-		return "Commands:\n/ping\n/status\n/ask <question>", nil
+		return "Commands:\n/ping\n/status\n/ask <question>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
 
 	case text == "/status":
 		return a.renderStatus(), nil
 
 	case text == "/ask" || strings.HasPrefix(text, "/ask "):
 		return a.handleAsk(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/ask")))
+
+	case text == "/calendar" || strings.HasPrefix(text, "/calendar "):
+		return a.handleCalendar(ctx, text)
+
+	case text == "/pending":
+		return a.handlePending()
+
+	case text == "/confirm" || strings.HasPrefix(text, "/confirm "):
+		return a.handleConfirm(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/confirm")))
+
+	case text == "/cancel" || strings.HasPrefix(text, "/cancel "):
+		return a.handleCancel(strings.TrimSpace(strings.TrimPrefix(text, "/cancel")))
 
 	default:
 		return "Unknown command. Try /help.", nil
@@ -73,7 +141,17 @@ func (a *Assistant) renderStatus() string {
 		access = "setup-open"
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access
+	calendar := "disabled"
+	if a.status.CalendarEnabled {
+		calendar = "enabled"
+	}
+
+	timezone := strings.TrimSpace(a.status.Timezone)
+	if timezone == "" {
+		timezone = a.location.String()
+	}
+
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {

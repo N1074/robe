@@ -55,3 +55,23 @@ func TestGetenvFloatReturnsParsedValue(t *testing.T) {
 		t.Fatalf("expected 0.7, got %f", got)
 	}
 }
+
+func TestLoadCalendarDefaults(t *testing.T) {
+	t.Setenv("CALENDAR_PROVIDER", "")
+	t.Setenv("CALENDAR_ID", "")
+	t.Setenv("CALENDAR_CREDENTIALS_FILE", "")
+	t.Setenv("CALENDAR_TOKEN_FILE", "")
+	t.Setenv("CALENDAR_TIMEZONE", "")
+
+	cfg := Load()
+
+	if cfg.CalendarProvider != "" {
+		t.Fatalf("expected empty calendar provider, got %q", cfg.CalendarProvider)
+	}
+	if cfg.CalendarID != "primary" {
+		t.Fatalf("expected primary calendar id, got %q", cfg.CalendarID)
+	}
+	if cfg.CalendarTimezone != "Europe/Madrid" {
+		t.Fatalf("expected Europe/Madrid timezone, got %q", cfg.CalendarTimezone)
+	}
+}

@@ -26,18 +26,16 @@ Implemented:
 - command handling through `internal/core`
 - `/ping`, `/start`, `/help`, `/status`
 - `/ask <question>` using a local Ollama model
+- Google Calendar read/create/delete behind confirmation gates
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
 
 Planned:
 
-- Google Calendar read
-- Google Calendar event creation with confirmation
 - Gmail read-only search and summarization
 - web search adapter
 - audit log
-- confirmation gate for sensitive actions
 - voice input and TTS
 - mobile / glasses bridge
 
@@ -72,7 +70,7 @@ Tool adapters:
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.25.8+
 - Ollama running locally
 - Telegram bot token
 - A local model available in Ollama, currently tested with `qwen3:14b`
@@ -104,7 +102,23 @@ Example:
     LLM_NUM_PREDICT=512
     LLM_TEMPERATURE=0.2
 
+    CALENDAR_PROVIDER=google
+    CALENDAR_ID=primary
+    CALENDAR_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-calendar-credentials.json
+    CALENDAR_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-calendar-token.json
+    CALENDAR_TIMEZONE=Europe/Madrid
+
 `.env` must not be committed.
+
+## Google Calendar setup
+
+Calendar integration uses Google OAuth credentials and a local token file.
+
+Generate the token on the server after configuring `CALENDAR_CREDENTIALS_FILE` and `CALENDAR_TOKEN_FILE`:
+
+    make google-auth
+
+Open the printed URL, approve Calendar access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path.
 
 ## Telegram setup
 
@@ -135,6 +149,14 @@ Telegram commands:
 - `/ping`
 - `/status` shows environment, LLM provider/model and access mode
 - `/ask <question>`
+- `/calendar today`
+- `/calendar tomorrow`
+- `/calendar week`
+- `/calendar create <title> | <start> | <end> [| location] [| description]`
+- `/calendar delete <event_id>`
+- `/pending`
+- `/confirm <token>`
+- `/cancel <token>`
 
 ## Quality checks
 
@@ -171,6 +193,10 @@ Expected smoke tests:
 - `/ping` replies `pong`
 - `/help` lists the available commands
 - `/status` replies that Robe is online and shows env, LLM and access mode
+- `/calendar today` lists upcoming events with event IDs
+- `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
+- `/calendar delete <event_id>` returns a proposal and token, not a deleted event
+- `/confirm <token>` executes the proposed create/delete
 - `/ask responde solo OK` returns a final answer without thinking text
 - an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
 
@@ -185,6 +211,13 @@ The intended policy is:
 - destructive actions are disabled until specifically implemented
 - email deletion, email sending, calendar modification and external posting require confirmation gates
 - all future tool executions should be auditable
+
+Current Calendar policy:
+
+- calendar reads execute directly for the authorized Telegram user
+- calendar create requires `/confirm <token>`
+- calendar delete requires `/confirm <token>`
+- ambiguous confirmations such as "yes" are ignored
 
 ## Development roadmap
 
@@ -202,7 +235,7 @@ Google Calendar read support.
 
 ### v0.3
 
-Calendar event creation with confirmation.
+Calendar event creation and deletion with explicit confirmation tokens.
 
 ### v0.4
 
