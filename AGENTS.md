@@ -28,6 +28,7 @@ The current intended version includes:
 - `/start`, `/help`, `/ping`, `/status`
 - `/ask <question>`
 - command handling in `internal/core`
+- `/status` reports env, LLM provider/model and Telegram access mode without secrets
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -99,6 +100,7 @@ Server smoke checks after `make run`:
 - Telegram `/status`
 - Telegram `/ask responde solo OK`
 - confirm Telegram does not show model thinking text
+- confirm `/status` does not expose tokens or secrets
 
 ## Conservative development workflow
 
@@ -119,8 +121,10 @@ While working:
 - prefer targeted `rg`, `go test ./package`, and focused diffs during iteration
 - use full `make check` or equivalent before finishing substantial work
 - keep code simple, explicit and auditable
+- let `gofmt` be authoritative for Go formatting
+- do not spend extra cycles chasing harmless line-ending/index noise unless it affects the actual diff, commit contents or runtime behavior
 
-Token efficiency matters. Prefer one good pass over several noisy passes. Group related investigation, implementation and verification steps so more time can be spent programming instead of re-reading the same context.
+Token efficiency matters. Prefer one good pass over several noisy passes. Group related investigation, implementation and verification steps so more time can be spent programming instead of re-reading the same context. Be flexible: avoid low-value cleanup rituals when they cost more attention than they save.
 
 At the end of any substantial task:
 
@@ -249,6 +253,7 @@ Core tests should continue to cover:
 - unknown command
 - `/ping`
 - `/status`
+- `/status` restricted and setup-open access modes
 - `/help`
 - `/ask` with empty prompt
 - `/ask` with mock LLM success
@@ -283,8 +288,8 @@ v0.1.1:
 - thin Telegram adapter
 - core assistant command handling
 - core command tests
+- safer `/status`
 - LLM thinking cleanup tests
-- improve `/status`
 
 v0.2:
 

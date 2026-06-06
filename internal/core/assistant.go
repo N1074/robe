@@ -11,13 +11,20 @@ type LLM interface {
 
 type Assistant struct {
 	llm    LLM
-	status string
+	status Status
 }
 
-func NewAssistant(llm LLM, status string) *Assistant {
+type Status struct {
+	Env              string
+	LLMProvider      string
+	LLMModel         string
+	AccessRestricted bool
+}
+
+func NewAssistant(llm LLM, status Status) *Assistant {
 	return &Assistant{
 		llm:    llm,
-		status: strings.TrimSpace(status),
+		status: status,
 	}
 }
 
@@ -35,10 +42,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Commands:\n/ping\n/status\n/ask <question>", nil
 
 	case text == "/status":
-		if a.status != "" {
-			return a.status, nil
-		}
-		return "Robe v0.1 online.", nil
+		return a.renderStatus(), nil
 
 	case text == "/ask" || strings.HasPrefix(text, "/ask "):
 		return a.handleAsk(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/ask")))
@@ -46,6 +50,30 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 	default:
 		return "Unknown command. Try /help.", nil
 	}
+}
+
+func (a *Assistant) renderStatus() string {
+	env := strings.TrimSpace(a.status.Env)
+	if env == "" {
+		env = "unknown"
+	}
+
+	provider := strings.TrimSpace(a.status.LLMProvider)
+	if provider == "" {
+		provider = "unknown"
+	}
+
+	model := strings.TrimSpace(a.status.LLMModel)
+	if model == "" {
+		model = "unknown"
+	}
+
+	access := "restricted"
+	if !a.status.AccessRestricted {
+		access = "setup-open"
+	}
+
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {

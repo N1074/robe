@@ -7,7 +7,7 @@ import (
 )
 
 func TestHandleTextEmptyMessage(t *testing.T) {
-	assistant := NewAssistant(nil, "")
+	assistant := NewAssistant(nil, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "   ")
 	if err != nil {
@@ -20,7 +20,7 @@ func TestHandleTextEmptyMessage(t *testing.T) {
 }
 
 func TestHandleTextUnknownCommand(t *testing.T) {
-	assistant := NewAssistant(nil, "")
+	assistant := NewAssistant(nil, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "/nope")
 	if err != nil {
@@ -33,7 +33,7 @@ func TestHandleTextUnknownCommand(t *testing.T) {
 }
 
 func TestHandleTextPing(t *testing.T) {
-	assistant := NewAssistant(nil, "")
+	assistant := NewAssistant(nil, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "/ping")
 	if err != nil {
@@ -46,20 +46,26 @@ func TestHandleTextPing(t *testing.T) {
 }
 
 func TestHandleTextStatus(t *testing.T) {
-	assistant := NewAssistant(nil, "Robe test status.")
+	assistant := NewAssistant(nil, Status{
+		Env:              "test",
+		LLMProvider:      "ollama",
+		LLMModel:         "qwen3:14b",
+		AccessRestricted: true,
+	})
 
 	got, err := assistant.HandleText(context.Background(), "/status")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if got != "Robe test status." {
+	want := "Robe v0.1 online.\nEnv: test\nLLM: ollama/qwen3:14b\nAccess: restricted"
+	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
 }
 
 func TestHandleTextHelp(t *testing.T) {
-	assistant := NewAssistant(nil, "")
+	assistant := NewAssistant(nil, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "/help")
 	if err != nil {
@@ -73,7 +79,7 @@ func TestHandleTextHelp(t *testing.T) {
 }
 
 func TestHandleTextAskEmptyPrompt(t *testing.T) {
-	assistant := NewAssistant(mockLLM{}, "")
+	assistant := NewAssistant(mockLLM{}, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "/ask   ")
 	if err != nil {
@@ -86,7 +92,7 @@ func TestHandleTextAskEmptyPrompt(t *testing.T) {
 }
 
 func TestHandleTextAskWithMockLLMSuccess(t *testing.T) {
-	assistant := NewAssistant(mockLLM{answer: "local answer"}, "")
+	assistant := NewAssistant(mockLLM{answer: "local answer"}, Status{})
 
 	got, err := assistant.HandleText(context.Background(), "/ask hello")
 	if err != nil {
@@ -100,11 +106,29 @@ func TestHandleTextAskWithMockLLMSuccess(t *testing.T) {
 
 func TestHandleTextAskWithMockLLMError(t *testing.T) {
 	wantErr := errors.New("llm unavailable")
-	assistant := NewAssistant(mockLLM{err: wantErr}, "")
+	assistant := NewAssistant(mockLLM{err: wantErr}, Status{})
 
 	_, err := assistant.HandleText(context.Background(), "/ask hello")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestHandleTextStatusShowsSetupOpenAccess(t *testing.T) {
+	assistant := NewAssistant(nil, Status{
+		Env:         "dev",
+		LLMProvider: "ollama",
+		LLMModel:    "dolphin-mistral:latest",
+	})
+
+	got, err := assistant.HandleText(context.Background(), "/status")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open"
+	if got != want {
+		t.Fatalf("unexpected response: %q", got)
 	}
 }
 

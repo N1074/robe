@@ -133,7 +133,7 @@ Telegram commands:
 - `/start`
 - `/help`
 - `/ping`
-- `/status`
+- `/status` shows environment, LLM provider/model and access mode
 - `/ask <question>`
 
 ## Quality checks
@@ -170,7 +170,7 @@ Expected smoke tests:
 
 - `/ping` replies `pong`
 - `/help` lists the available commands
-- `/status` replies that Robe is online
+- `/status` replies that Robe is online and shows env, LLM and access mode
 - `/ask responde solo OK` returns a final answer without thinking text
 - an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
 
@@ -194,7 +194,7 @@ Local Telegram assistant using Ollama.
 
 ### v0.1.1
 
-Thin Telegram adapter, core assistant command handling, core tests and LLM thinking cleanup.
+Thin Telegram adapter, core assistant command handling, safer `/status`, core tests and LLM thinking cleanup.
 
 ### v0.2
 

@@ -40,7 +40,12 @@ func main() {
 	}
 
 	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature)
-	assistant := core.NewAssistant(llmClient, "Robe v0.1 online.")
+	assistant := core.NewAssistant(llmClient, core.Status{
+		Env:              cfg.Env,
+		LLMProvider:      cfg.LLMProvider,
+		LLMModel:         cfg.LLMModel,
+		AccessRestricted: cfg.TelegramAllowedUserID != "",
+	})
 
 	if cfg.TelegramBotToken != "" {
 		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, logger)

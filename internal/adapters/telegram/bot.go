@@ -55,6 +55,11 @@ func (b *Bot) Start(ctx context.Context) error {
 }
 
 func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
+	if message.From == nil {
+		b.logger.Warn("ignoring telegram message without sender")
+		return
+	}
+
 	userID := strconv.FormatInt(message.From.ID, 10)
 
 	if b.allowedUserID == "" {
