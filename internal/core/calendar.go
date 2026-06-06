@@ -187,6 +187,28 @@ func (a *Assistant) proposeCalendarCreate(input string) (string, error) {
 		return err.Error(), nil
 	}
 
+	return a.proposeCalendarCreateDraft(draft)
+}
+
+func (a *Assistant) proposeCalendarCreateDraft(draft CalendarEventDraft) (string, error) {
+	if a.calendar == nil {
+		return "Calendar is not configured.", nil
+	}
+
+	draft.Title = strings.TrimSpace(draft.Title)
+	if draft.Title == "" {
+		return "Calendar event title is required.", nil
+	}
+	if draft.Start.IsZero() {
+		return "Calendar event start time is required.", nil
+	}
+	if draft.End.IsZero() {
+		draft.End = draft.Start.Add(time.Hour)
+	}
+	if !draft.End.After(draft.Start) {
+		return "Calendar event end time must be after start time.", nil
+	}
+
 	token, err := a.newCalendarToken()
 	if err != nil {
 		return "", err

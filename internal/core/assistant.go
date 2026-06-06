@@ -12,6 +12,7 @@ type LLM interface {
 
 type Assistant struct {
 	llm             LLM
+	intentParser    IntentParser
 	calendar        Calendar
 	status          Status
 	location        *time.Location
@@ -54,6 +55,10 @@ func NewAssistant(llm LLM, status Status, opts ...AssistantOption) *Assistant {
 		tokenGenerator:  randomToken,
 	}
 
+	if parser, ok := llm.(IntentParser); ok {
+		assistant.intentParser = parser
+	}
+
 	for _, opt := range opts {
 		opt(assistant)
 	}
@@ -65,6 +70,12 @@ func WithCalendar(calendar Calendar) AssistantOption {
 	return func(a *Assistant) {
 		a.calendar = calendar
 		a.status.CalendarEnabled = calendar != nil
+	}
+}
+
+func WithIntentParser(parser IntentParser) AssistantOption {
+	return func(a *Assistant) {
+		a.intentParser = parser
 	}
 }
 
@@ -88,6 +99,9 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 	text = strings.TrimSpace(text)
 
 	switch {
+	case text == "":
+		return "Unknown command. Try /help.", nil
+
 	case text == "/ping":
 		return "pong", nil
 
@@ -116,7 +130,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return a.handleCancel(strings.TrimSpace(strings.TrimPrefix(text, "/cancel")))
 
 	default:
-		return "Unknown command. Try /help.", nil
+		return a.handleNaturalText(ctx, text)
 	}
 }
 

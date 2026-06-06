@@ -31,6 +31,7 @@ The current intended version includes:
 - command handling in `internal/core`
 - `/status` reports env, LLM provider/model and Telegram access mode without secrets
 - Google Calendar read/create/delete commands with explicit confirmation for writes
+- natural-language intent routing through the local LLM
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -102,6 +103,7 @@ Server smoke checks after `make run`:
 - Telegram `/status`
 - Telegram `/calendar today`
 - Telegram `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15`
+- Telegram natural language: `crea una cita mañana a las 12 con el dentista`
 - Telegram `/calendar delete <event_id>`
 - Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
 - Telegram `/ask responde solo OK`
@@ -159,6 +161,8 @@ Useful Make targets:
 - `make google-auth`: create/update the local Google Calendar OAuth token
 - `make build`: build `bin/robe-server`
 - `make health`: call `http://localhost:8080/health`
+
+On Windows PowerShell, `make` may not be installed and local script execution may be restricted. Use `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run`, `google-auth`, `check`, `build` or `health` as local equivalents. Keep `make` as the Ubuntu server workflow.
 
 Test coverage should scale with risk:
 
@@ -231,6 +235,7 @@ Policy:
 - email deletion is not allowed in early versions
 - calendar event creation requires confirmation
 - calendar event deletion requires confirmation
+- natural-language calendar write intents require the same explicit confirmation tokens as command-based writes
 - external posting requires confirmation
 - future tool executions should be auditable
 
@@ -261,6 +266,7 @@ Current commands:
 - `/pending`
 - `/confirm <token>`
 - `/cancel <token>`
+- natural-language calendar create/list/delete intents parsed by the LLM
 
 Core tests should continue to cover:
 
@@ -279,6 +285,8 @@ Core tests should continue to cover:
 - `/confirm <token>` execution
 - `/cancel <token>`
 - `/pending`
+- natural-language calendar create intent without execution
+- natural-language calendar list intent
 
 ## Important current warning
 
@@ -319,6 +327,10 @@ v0.2:
 v0.3:
 
 - Calendar event creation and deletion with confirmation gate
+
+v0.3.1:
+
+- Natural-language intent routing for calendar reads and proposals
 
 v0.4:
 

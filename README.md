@@ -27,6 +27,7 @@ Implemented:
 - `/ping`, `/start`, `/help`, `/status`
 - `/ask <question>` using a local Ollama model
 - Google Calendar read/create/delete behind confirmation gates
+- natural-language intent routing through the local LLM
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
@@ -118,6 +119,10 @@ Generate the token on the server after configuring `CALENDAR_CREDENTIALS_FILE` a
 
     make google-auth
 
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
+
 Open the printed URL, approve Calendar access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path.
 
 ## Telegram setup
@@ -130,9 +135,17 @@ If `TELEGRAM_ALLOWED_USER_ID` is empty, Robe logs the detected Telegram user ID.
 
     make run
 
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run
+
 Build a local binary:
 
     make build
+
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 build
 
 Health check:
 
@@ -141,6 +154,10 @@ Health check:
 Or, if the server is already running:
 
     make health
+
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 health
 
 Telegram commands:
 
@@ -158,9 +175,20 @@ Telegram commands:
 - `/confirm <token>`
 - `/cancel <token>`
 
+Natural language also works for supported calendar intents. For example:
+
+    crea una cita de calendario para mañana a las 12 con el dentista
+    que tengo mañana en el calendario
+
+Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
+
 ## Quality checks
 
     make check
+
+On Windows PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 check
 
 This runs:
 
@@ -196,6 +224,7 @@ Expected smoke tests:
 - `/calendar today` lists upcoming events with event IDs
 - `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
 - `/calendar delete <event_id>` returns a proposal and token, not a deleted event
+- `crea una cita mañana a las 12 con el dentista` returns a proposal and token, not a created event
 - `/confirm <token>` executes the proposed create/delete
 - `/ask responde solo OK` returns a final answer without thinking text
 - an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
@@ -217,6 +246,7 @@ Current Calendar policy:
 - calendar reads execute directly for the authorized Telegram user
 - calendar create requires `/confirm <token>`
 - calendar delete requires `/confirm <token>`
+- natural-language calendar create/delete also require `/confirm <token>`
 - ambiguous confirmations such as "yes" are ignored
 
 ## Development roadmap

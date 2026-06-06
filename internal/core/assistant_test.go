@@ -272,6 +272,81 @@ func TestHandleTextPendingCalendarActions(t *testing.T) {
 	}
 }
 
+func TestHandleTextNaturalCalendarCreateIntentRequiresConfirmation(t *testing.T) {
+	calendar := &mockCalendar{}
+	intentParser := mockIntentParser{
+		intent: Intent{
+			Kind: IntentCalendarCreate,
+		},
+	}
+	intentParser.intent.CalendarDraft = CalendarEventDraft{
+		Title: "Dentist",
+		Start: fixedTime(t, "2026-06-07T12:00:00+02:00"),
+		End:   fixedTime(t, "2026-06-07T13:00:00+02:00"),
+	}
+	assistant := testCalendarAssistant(t, calendar, WithIntentParser(intentParser))
+
+	got, err := assistant.HandleText(context.Background(), "crea una cita de calendario para manana a las 12 con el dentista")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "Proposed calendar action:\nCreate event") || !strings.Contains(got, "Title: Dentist") || !strings.Contains(got, "/confirm cal_TEST") {
+		t.Fatalf("unexpected proposal: %q", got)
+	}
+	if calendar.createdCount != 0 {
+		t.Fatalf("event was created before confirmation")
+	}
+}
+
+func TestHandleTextNaturalCalendarListIntent(t *testing.T) {
+	calendar := &mockCalendar{
+		events: []CalendarEvent{
+			{
+				ID:    "evt_1",
+				Title: "Dentist",
+				Start: fixedTime(t, "2026-06-07T12:00:00+02:00"),
+				End:   fixedTime(t, "2026-06-07T13:00:00+02:00"),
+			},
+		},
+	}
+	intentParser := mockIntentParser{
+		intent: Intent{
+			Kind:           IntentCalendarList,
+			CalendarPeriod: "tomorrow",
+		},
+	}
+	assistant := testCalendarAssistant(t, calendar, WithIntentParser(intentParser))
+
+	got, err := assistant.HandleText(context.Background(), "que tengo manana")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "Calendar tomorrow:") || !strings.Contains(got, "Dentist") {
+		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
+func TestHandleTextNaturalAskIntentFallsBackToLLM(t *testing.T) {
+	llm := mockLLM{answer: "answer"}
+	intentParser := mockIntentParser{
+		intent: Intent{
+			Kind:      IntentAsk,
+			AskPrompt: "hello",
+		},
+	}
+	assistant := NewAssistant(llm, Status{}, WithIntentParser(intentParser))
+
+	got, err := assistant.HandleText(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != "answer" {
+		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
 type mockLLM struct {
 	answer string
 	err    error
@@ -309,16 +384,30 @@ func (m *mockCalendar) DeleteEvent(ctx context.Context, eventID string) error {
 	return nil
 }
 
-func testCalendarAssistant(t *testing.T, calendar Calendar) *Assistant {
+type mockIntentParser struct {
+	intent Intent
+	err    error
+}
+
+func (m mockIntentParser) ParseIntent(ctx context.Context, req IntentRequest) (Intent, error) {
+	return m.intent, m.err
+}
+
+func testCalendarAssistant(t *testing.T, calendar Calendar, opts ...AssistantOption) *Assistant {
 	t.Helper()
 
 	now := fixedTime(t, "2026-06-06T12:00:00+02:00")
-	return NewAssistant(
-		nil,
-		Status{Timezone: "Europe/Madrid"},
+	options := []AssistantOption{
 		WithCalendar(calendar),
 		WithNow(func() time.Time { return now }),
 		WithTokenGenerator(func(prefix string) (string, error) { return prefix + "TEST", nil }),
+	}
+	options = append(options, opts...)
+
+	return NewAssistant(
+		nil,
+		Status{Timezone: "Europe/Madrid"},
+		options...,
 	)
 }
 
