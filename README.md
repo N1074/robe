@@ -205,6 +205,10 @@ Telegram commands:
 - `/ask <question>`
 - `/remember <text>`
 - `/memories <query>`
+- `/project list`
+- `/project create <slug> | <name>`
+- `/project use <slug>`
+- `/project status`
 - `/calendar today`
 - `/calendar tomorrow`
 - `/calendar week`
@@ -304,8 +308,20 @@ Current Memory policy:
 
 - memories are saved only through explicit `/remember <text>`
 - memory search is explicit through `/memories <query>`
+- memories can be global or project-scoped
+- supported memory kinds: `note`, `preference`, `fact`, `task`, `decision`, `project_knowledge`, `contact`, `operational`
+- supported metadata includes kind, project, tags, source, confidence, importance, status and timestamps
 - no automatic memory writes yet
 - project context and RAG should build on top of this storage layer, not inside Telegram
+
+Structured memory examples:
+
+    /project create robe | Robe
+    /project use robe
+    /remember --kind decision --tags architecture,postgres Use Postgres as Robe's source of truth.
+    /remember --project home --kind preference --tags calendar,dentist Dentist appointments should be in the morning.
+    /memories --project robe --kind decision postgres
+    /memories --tag dentist appointment
 
 ## Development roadmap
 
@@ -339,7 +355,7 @@ Voice input through local STT, TTS and mobile bridge.
 
 ### v0.7
 
-Manual local memory with Postgres, followed by project context and retrieval-augmented context behind explicit storage/tool boundaries.
+Structured, project-aware local memory with Postgres, followed by retrieval-augmented context behind explicit storage/tool boundaries.
 
 ### Later
 

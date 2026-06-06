@@ -15,6 +15,7 @@ type Assistant struct {
 	intentParser    IntentParser
 	calendar        Calendar
 	memory          MemoryStore
+	activeProject   string
 	status          Status
 	location        *time.Location
 	pendingTTL      time.Duration
@@ -119,7 +120,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Robe v0.1 online. Try /ping or /ask <question>.", nil
 
 	case text == "/help":
-		return "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
+		return "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
 
 	case text == "/status":
 		return a.renderStatus(), nil
@@ -132,6 +133,9 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 
 	case text == "/memories" || strings.HasPrefix(text, "/memories "):
 		return a.handleMemories(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/memories")))
+
+	case text == "/project" || strings.HasPrefix(text, "/project "):
+		return a.handleProject(ctx, text)
 
 	case text == "/calendar" || strings.HasPrefix(text, "/calendar "):
 		return a.handleCalendar(ctx, text)
@@ -191,7 +195,12 @@ func (a *Assistant) renderStatus() string {
 		timezone = a.location.String()
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nTimezone: " + timezone
+	project := a.activeProject
+	if project == "" {
+		project = "global"
+	}
+
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nProject: " + project + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {

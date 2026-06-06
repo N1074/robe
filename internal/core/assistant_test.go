@@ -61,7 +61,7 @@ func TestHandleTextStatus(t *testing.T) {
 	}
 
 	want := "Robe v0.1 online.\nEnv: test\nLLM: ollama/qwen3:14b\nAccess: restricted"
-	want += "\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nTimezone: Local"
+	want += "\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nProject: global\nTimezone: Local"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -75,7 +75,7 @@ func TestHandleTextHelp(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	want := "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>"
+	want := "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -129,7 +129,7 @@ func TestHandleTextStatusShowsSetupOpenAccess(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nTimezone: Local"
+	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nVoice: disabled\nMemory: disabled\nProject: global\nTimezone: Local"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -166,6 +166,23 @@ func TestHandleTextRememberStoresMemory(t *testing.T) {
 	}
 }
 
+func TestHandleTextRememberStoresStructuredMemory(t *testing.T) {
+	memory := &mockMemoryStore{}
+	assistant := NewAssistant(nil, Status{}, WithMemory(memory))
+
+	got, err := assistant.HandleText(context.Background(), "/remember --project robe --kind decision --tags architecture,postgres use Postgres as source of truth")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "[decision/robe]") || !strings.Contains(got, "#architecture #postgres") {
+		t.Fatalf("unexpected response: %q", got)
+	}
+	if memory.memories[0].Project.Slug != "robe" || memory.memories[0].Kind != "decision" {
+		t.Fatalf("unexpected memory: %#v", memory.memories[0])
+	}
+}
+
 func TestHandleTextMemoriesSearchesMemory(t *testing.T) {
 	memory := &mockMemoryStore{
 		memories: []Memory{
@@ -186,6 +203,34 @@ func TestHandleTextMemoriesSearchesMemory(t *testing.T) {
 
 	if !strings.Contains(got, "Memories:") || !strings.Contains(got, "dentist") {
 		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
+func TestHandleTextProjectCreateUseAndRemember(t *testing.T) {
+	memory := &mockMemoryStore{}
+	assistant := NewAssistant(nil, Status{}, WithMemory(memory))
+
+	got, err := assistant.HandleText(context.Background(), "/project create robe | Robe")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(got, "Project created:") {
+		t.Fatalf("unexpected create response: %q", got)
+	}
+
+	got, err = assistant.HandleText(context.Background(), "/project use robe")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != "Active project: robe | Robe" {
+		t.Fatalf("unexpected use response: %q", got)
+	}
+
+	if _, err = assistant.HandleText(context.Background(), "/remember project memory"); err != nil {
+		t.Fatalf("expected remember, got %v", err)
+	}
+	if memory.memories[0].Project.Slug != "robe" {
+		t.Fatalf("expected active project robe, got %#v", memory.memories[0].Project)
 	}
 }
 
@@ -426,6 +471,7 @@ type mockCalendar struct {
 
 type mockMemoryStore struct {
 	memories []Memory
+	projects map[string]Project
 }
 
 func (m *mockMemoryStore) AddMemory(ctx context.Context, memory Memory) (Memory, error) {
@@ -434,8 +480,30 @@ func (m *mockMemoryStore) AddMemory(ctx context.Context, memory Memory) (Memory,
 	return memory, nil
 }
 
-func (m *mockMemoryStore) SearchMemories(ctx context.Context, query string, limit int) ([]Memory, error) {
+func (m *mockMemoryStore) SearchMemories(ctx context.Context, filter MemoryFilter) ([]Memory, error) {
 	return m.memories, nil
+}
+
+func (m *mockMemoryStore) CreateProject(ctx context.Context, project Project) (Project, error) {
+	if m.projects == nil {
+		m.projects = make(map[string]Project)
+	}
+	project.ID = "1"
+	project.Status = nonEmpty(project.Status, "active")
+	m.projects[project.Slug] = project
+	return project, nil
+}
+
+func (m *mockMemoryStore) ListProjects(ctx context.Context) ([]Project, error) {
+	var projects []Project
+	for _, project := range m.projects {
+		projects = append(projects, project)
+	}
+	return projects, nil
+}
+
+func (m *mockMemoryStore) GetProject(ctx context.Context, slug string) (Project, error) {
+	return m.projects[slug], nil
 }
 
 func (m *mockCalendar) ListEvents(ctx context.Context, query CalendarQuery) ([]CalendarEvent, error) {

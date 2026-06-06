@@ -281,6 +281,8 @@ Current commands:
 - Telegram voice/audio messages transcribed to text before core handling
 - STT commands should print only the transcript on stdout; logs belong on stderr. Robe also filters common `whisper.cpp` log lines defensively.
 - `/remember <text>` stores manual memory; `/memories <query>` searches manual memory
+- structured memory supports kind, project scope, tags, source, confidence, importance, status and timestamps
+- projects are explicit; global memories have no project
 
 Core tests should continue to cover:
 
@@ -303,6 +305,7 @@ Core tests should continue to cover:
 - natural-language calendar list intent
 - `/remember` with mock MemoryStore
 - `/memories` with mock MemoryStore
+- project create/use/list behavior with mock MemoryStore
 
 ## Important current warning
 
@@ -363,6 +366,7 @@ v0.6:
 v0.7:
 
 - manual local memory through Postgres
+- structured project-aware memory before embeddings/RAG
 - project context and RAG as core/tool/storage capabilities, not Telegram logic
 
 Later:
