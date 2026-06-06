@@ -11,9 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+const telegramMaxMessageRunes = 3900
 
 type HandleTextFunc func(ctx context.Context, text string) (string, error)
 type TranscribeFunc func(ctx context.Context, audioPath string) (string, error)
@@ -199,9 +202,63 @@ func messageAudioFile(message *tgbotapi.Message) (string, string) {
 }
 
 func (b *Bot) reply(chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
+	for _, chunk := range splitTelegramMessage(text) {
+		msg := tgbotapi.NewMessage(chatID, chunk)
 
-	if _, err := b.api.Send(msg); err != nil {
-		b.logger.Error("failed to send telegram message", "error", err)
+		if _, err := b.api.Send(msg); err != nil {
+			b.logger.Error("failed to send telegram message", "error", err)
+		}
 	}
+}
+
+func splitTelegramMessage(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return []string{""}
+	}
+
+	if utf8.RuneCountInString(text) <= telegramMaxMessageRunes {
+		return []string{text}
+	}
+
+	var chunks []string
+	remaining := text
+
+	for utf8.RuneCountInString(remaining) > telegramMaxMessageRunes {
+		cut := cutTelegramChunk(remaining)
+		chunks = append(chunks, strings.TrimSpace(remaining[:cut]))
+		remaining = strings.TrimSpace(remaining[cut:])
+	}
+
+	if remaining != "" {
+		chunks = append(chunks, remaining)
+	}
+
+	return chunks
+}
+
+func cutTelegramChunk(text string) int {
+	cut := 0
+	count := 0
+	for idx := range text {
+		if count == telegramMaxMessageRunes {
+			break
+		}
+		cut = idx
+		count++
+	}
+
+	if cut <= 0 {
+		return len(text)
+	}
+
+	candidate := text[:cut]
+	if newline := strings.LastIndex(candidate, "\n"); newline > telegramMaxMessageRunes/2 {
+		return newline
+	}
+	if space := strings.LastIndex(candidate, " "); space > telegramMaxMessageRunes/2 {
+		return space
+	}
+
+	return cut
 }
