@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	calendaradapter "github.com/N1074/robe/internal/adapters/calendar"
 	"github.com/N1074/robe/internal/adapters/llm"
+	"github.com/N1074/robe/internal/adapters/stt"
 	"github.com/N1074/robe/internal/adapters/telegram"
 	"github.com/N1074/robe/internal/config"
 	"github.com/N1074/robe/internal/core"
@@ -58,17 +60,27 @@ func main() {
 		logger.Warn("unsupported calendar provider", "provider", cfg.CalendarProvider)
 	}
 
+	var transcribe telegram.TranscribeFunc
+	if cfg.STTProvider == "command" {
+		transcriber := stt.NewCommandTranscriber(cfg.STTCommand, cfg.STTArgs, time.Duration(cfg.STTTimeoutSeconds)*time.Second)
+		transcribe = transcriber.Transcribe
+		logger.Info("stt command configured")
+	} else if cfg.STTProvider != "" {
+		logger.Warn("unsupported stt provider", "provider", cfg.STTProvider)
+	}
+
 	assistant := core.NewAssistant(llmClient, core.Status{
 		Env:              cfg.Env,
 		LLMProvider:      cfg.LLMProvider,
 		LLMModel:         cfg.LLMModel,
 		AccessRestricted: cfg.TelegramAllowedUserID != "",
 		CalendarEnabled:  calendarClient != nil,
+		VoiceEnabled:     transcribe != nil,
 		Timezone:         cfg.CalendarTimezone,
 	}, core.WithCalendar(calendarClient))
 
 	if cfg.TelegramBotToken != "" {
-		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, logger)
+		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, transcribe, logger)
 		if err != nil {
 			logger.Error("failed to create telegram bot", "error", err)
 			os.Exit(1)

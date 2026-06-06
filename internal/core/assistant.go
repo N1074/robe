@@ -28,6 +28,7 @@ type Status struct {
 	LLMModel         string
 	AccessRestricted bool
 	CalendarEnabled  bool
+	VoiceEnabled     bool
 	Timezone         string
 }
 
@@ -160,12 +161,17 @@ func (a *Assistant) renderStatus() string {
 		calendar = "enabled"
 	}
 
+	voice := "disabled"
+	if a.status.VoiceEnabled {
+		voice = "enabled"
+	}
+
 	timezone := strings.TrimSpace(a.status.Timezone)
 	if timezone == "" {
 		timezone = a.location.String()
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nTimezone: " + timezone
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {

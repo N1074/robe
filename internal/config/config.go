@@ -24,6 +24,11 @@ type Config struct {
 	CalendarCredentialsFile string
 	CalendarTokenFile       string
 	CalendarTimezone        string
+
+	STTProvider       string
+	STTCommand        string
+	STTArgs           []string
+	STTTimeoutSeconds int
 }
 
 func Load() Config {
@@ -46,6 +51,11 @@ func Load() Config {
 		CalendarCredentialsFile: os.Getenv("CALENDAR_CREDENTIALS_FILE"),
 		CalendarTokenFile:       os.Getenv("CALENDAR_TOKEN_FILE"),
 		CalendarTimezone:        getenv("CALENDAR_TIMEZONE", "Europe/Madrid"),
+
+		STTProvider:       getenv("STT_PROVIDER", ""),
+		STTCommand:        os.Getenv("STT_COMMAND"),
+		STTArgs:           splitArgs(os.Getenv("STT_ARGS")),
+		STTTimeoutSeconds: getenvInt("STT_TIMEOUT_SECONDS", 120),
 	}
 }
 
@@ -83,6 +93,15 @@ func getenvFloat(key string, fallback float64) float64 {
 	}
 
 	return parsed
+}
+
+func splitArgs(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	return strings.Fields(value)
 }
 
 func loadDotEnv(path string) {

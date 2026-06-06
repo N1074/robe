@@ -75,3 +75,40 @@ func TestLoadCalendarDefaults(t *testing.T) {
 		t.Fatalf("expected Europe/Madrid timezone, got %q", cfg.CalendarTimezone)
 	}
 }
+
+func TestSplitArgs(t *testing.T) {
+	got := splitArgs("--language es --file={audio}")
+	want := []string{"--language", "es", "--file={audio}"}
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d args, got %d", len(want), len(got))
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestLoadSTTDefaults(t *testing.T) {
+	t.Setenv("STT_PROVIDER", "")
+	t.Setenv("STT_COMMAND", "")
+	t.Setenv("STT_ARGS", "")
+	t.Setenv("STT_TIMEOUT_SECONDS", "")
+
+	cfg := Load()
+
+	if cfg.STTProvider != "" {
+		t.Fatalf("expected empty stt provider, got %q", cfg.STTProvider)
+	}
+	if cfg.STTCommand != "" {
+		t.Fatalf("expected empty stt command, got %q", cfg.STTCommand)
+	}
+	if len(cfg.STTArgs) != 0 {
+		t.Fatalf("expected no stt args, got %#v", cfg.STTArgs)
+	}
+	if cfg.STTTimeoutSeconds != 120 {
+		t.Fatalf("expected stt timeout 120, got %d", cfg.STTTimeoutSeconds)
+	}
+}

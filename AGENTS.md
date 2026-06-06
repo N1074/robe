@@ -32,6 +32,7 @@ The current intended version includes:
 - `/status` reports env, LLM provider/model and Telegram access mode without secrets
 - Google Calendar read/create/delete commands with explicit confirmation for writes
 - natural-language intent routing through the local LLM
+- Telegram voice/audio input through configurable local STT
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -104,6 +105,7 @@ Server smoke checks after `make run`:
 - Telegram `/calendar today`
 - Telegram `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15`
 - Telegram natural language: `crea una cita mañana a las 12 con el dentista`
+- Telegram voice message: `crea una cita mañana a las 12 con el dentista`
 - Telegram `/calendar delete <event_id>`
 - Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
 - Telegram `/ask responde solo OK`
@@ -219,6 +221,7 @@ Planned adapters:
 - Gmail read-only
 - web search
 - local storage
+- local STT command adapter
 - future STT/TTS
 - future mobile/glasses bridge
 
@@ -236,6 +239,7 @@ Policy:
 - calendar event creation requires confirmation
 - calendar event deletion requires confirmation
 - natural-language calendar write intents require the same explicit confirmation tokens as command-based writes
+- voice-transcribed calendar write intents require the same explicit confirmation tokens as text intents
 - external posting requires confirmation
 - future tool executions should be auditable
 
@@ -267,6 +271,7 @@ Current commands:
 - `/confirm <token>`
 - `/cancel <token>`
 - natural-language calendar create/list/delete intents parsed by the LLM
+- Telegram voice/audio messages transcribed to text before core handling
 
 Core tests should continue to cover:
 
@@ -343,6 +348,10 @@ v0.5:
 v0.6:
 
 - STT/TTS and mobile bridge
+
+v0.7:
+
+- memory, project context and RAG as core/tool/storage capabilities, not Telegram logic
 
 Later:
 

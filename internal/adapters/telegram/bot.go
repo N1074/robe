@@ -2,7 +2,12 @@ package telegram
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,15 +16,17 @@ import (
 )
 
 type HandleTextFunc func(ctx context.Context, text string) (string, error)
+type TranscribeFunc func(ctx context.Context, audioPath string) (string, error)
 
 type Bot struct {
 	api           *tgbotapi.BotAPI
 	allowedUserID string
 	handleText    HandleTextFunc
+	transcribe    TranscribeFunc
 	logger        *slog.Logger
 }
 
-func New(token string, allowedUserID string, handleText HandleTextFunc, logger *slog.Logger) (*Bot, error) {
+func New(token string, allowedUserID string, handleText HandleTextFunc, transcribe TranscribeFunc, logger *slog.Logger) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -29,6 +36,7 @@ func New(token string, allowedUserID string, handleText HandleTextFunc, logger *
 		api:           api,
 		allowedUserID: strings.TrimSpace(allowedUserID),
 		handleText:    handleText,
+		transcribe:    transcribe,
 		logger:        logger,
 	}, nil
 }
@@ -83,9 +91,15 @@ func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	text := strings.TrimSpace(message.Text)
+	audioFileID, audioExt := messageAudioFile(message)
 
 	requestCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+
+	if audioFileID != "" {
+		b.handleAudio(requestCtx, message.Chat.ID, audioFileID, audioExt)
+		return
+	}
 
 	answer, err := b.handleText(requestCtx, text)
 	if err != nil {
@@ -95,6 +109,93 @@ func (b *Bot) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	b.reply(message.Chat.ID, answer)
+}
+
+func (b *Bot) handleAudio(ctx context.Context, chatID int64, fileID string, ext string) {
+	if b.transcribe == nil {
+		b.reply(chatID, "Voice input is not configured.")
+		return
+	}
+
+	path, err := b.downloadTelegramFile(ctx, fileID, ext)
+	if err != nil {
+		b.logger.Error("failed to download telegram audio", "error", err)
+		b.reply(chatID, "Voice error: failed to download audio.")
+		return
+	}
+	defer os.Remove(path)
+
+	transcript, err := b.transcribe(ctx, path)
+	if err != nil {
+		b.logger.Error("stt transcription failed", "error", err)
+		b.reply(chatID, "Voice error: "+err.Error())
+		return
+	}
+
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		b.reply(chatID, "Voice error: empty transcript.")
+		return
+	}
+
+	answer, err := b.handleText(ctx, transcript)
+	if err != nil {
+		b.logger.Error("assistant handle transcript failed", "error", err)
+		b.reply(chatID, "LLM error: "+err.Error())
+		return
+	}
+
+	b.reply(chatID, "Heard: "+transcript+"\n\n"+answer)
+}
+
+func (b *Bot) downloadTelegramFile(ctx context.Context, fileID string, ext string) (string, error) {
+	url, err := b.api.GetFileDirectURL(fileID)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("telegram file download returned status %d", resp.StatusCode)
+	}
+
+	file, err := os.CreateTemp("", "robe-telegram-audio-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	if _, err := io.Copy(file, resp.Body); err != nil {
+		os.Remove(file.Name())
+		return "", err
+	}
+
+	return file.Name(), nil
+}
+
+func messageAudioFile(message *tgbotapi.Message) (string, string) {
+	if message.Voice != nil {
+		return message.Voice.FileID, ".oga"
+	}
+
+	if message.Audio != nil {
+		ext := filepath.Ext(message.Audio.FileName)
+		if ext == "" {
+			ext = ".audio"
+		}
+		return message.Audio.FileID, ext
+	}
+
+	return "", ""
 }
 
 func (b *Bot) reply(chatID int64, text string) {

@@ -61,7 +61,7 @@ func TestHandleTextStatus(t *testing.T) {
 	}
 
 	want := "Robe v0.1 online.\nEnv: test\nLLM: ollama/qwen3:14b\nAccess: restricted"
-	want += "\nCalendar: disabled\nTimezone: Local"
+	want += "\nCalendar: disabled\nVoice: disabled\nTimezone: Local"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}
@@ -129,7 +129,7 @@ func TestHandleTextStatusShowsSetupOpenAccess(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nTimezone: Local"
+	want := "Robe v0.1 online.\nEnv: dev\nLLM: ollama/dolphin-mistral:latest\nAccess: setup-open\nCalendar: disabled\nVoice: disabled\nTimezone: Local"
 	if got != want {
 		t.Fatalf("unexpected response: %q", got)
 	}

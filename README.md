@@ -28,6 +28,7 @@ Implemented:
 - `/ask <question>` using a local Ollama model
 - Google Calendar read/create/delete behind confirmation gates
 - natural-language intent routing through the local LLM
+- Telegram voice/audio input through configurable local STT
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
@@ -37,14 +38,18 @@ Planned:
 - Gmail read-only search and summarization
 - web search adapter
 - audit log
-- voice input and TTS
+- TTS
 - mobile / glasses bridge
 
 ## Architecture
 
-Current flow:
+Current text flow:
 
 Telegram -> Robe Go server -> Telegram adapter -> core assistant -> Ollama LLM adapter -> Local model response -> Telegram reply
+
+Current voice flow:
+
+Telegram voice/audio -> Telegram adapter -> STT adapter -> core assistant -> intent/LLM/tools -> Telegram reply
 
 Architecture:
 
@@ -74,6 +79,7 @@ Tool adapters:
 - Go 1.25.8+
 - Ollama running locally
 - Telegram bot token
+- Optional local STT command for voice/audio input
 - A local model available in Ollama, currently tested with `qwen3:14b`
 
 The current Ollama endpoint used by this deployment is:
@@ -108,6 +114,11 @@ Example:
     CALENDAR_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-calendar-credentials.json
     CALENDAR_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-calendar-token.json
     CALENDAR_TIMEZONE=Europe/Madrid
+
+    STT_PROVIDER=command
+    STT_COMMAND=/opt/ai/bin/transcribe-audio
+    STT_ARGS={audio}
+    STT_TIMEOUT_SECONDS=120
 
 `.env` must not be committed.
 
@@ -182,6 +193,8 @@ Natural language also works for supported calendar intents. For example:
 
 Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
 
+Voice messages and audio files sent to Telegram are transcribed first, then processed like normal text. The STT command must print the transcript to stdout. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted; if omitted, Robe appends the audio path as the final argument.
+
 ## Quality checks
 
     make check
@@ -221,6 +234,7 @@ Expected smoke tests:
 - `/ping` replies `pong`
 - `/help` lists the available commands
 - `/status` replies that Robe is online and shows env, LLM and access mode
+- voice message `crea una cita mañana a las 12 con el dentista` returns a heard transcript and a proposal token
 - `/calendar today` lists upcoming events with event IDs
 - `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
 - `/calendar delete <event_id>` returns a proposal and token, not a deleted event
@@ -247,6 +261,7 @@ Current Calendar policy:
 - calendar create requires `/confirm <token>`
 - calendar delete requires `/confirm <token>`
 - natural-language calendar create/delete also require `/confirm <token>`
+- voice calendar create/delete also require `/confirm <token>`
 - ambiguous confirmations such as "yes" are ignored
 
 ## Development roadmap
@@ -277,7 +292,11 @@ Web search adapter.
 
 ### v0.6
 
-Voice input, TTS and mobile bridge.
+Voice input through local STT, TTS and mobile bridge.
+
+### v0.7
+
+Memory, project context and retrieval-augmented context behind explicit storage/tool boundaries.
 
 ### Later
 
