@@ -71,6 +71,7 @@ func main() {
 	}
 
 	var memoryStore core.MemoryStore
+	var auditLogger core.AuditLogger
 	if cfg.MemoryProvider == "postgres" {
 		store, err := storage.NewPostgresMemoryStore(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -78,22 +79,32 @@ func main() {
 		} else {
 			defer store.Close()
 			memoryStore = store
+			auditLogger = store
 			logger.Info("postgres memory configured")
 		}
 	} else if cfg.MemoryProvider != "" {
 		logger.Warn("unsupported memory provider", "provider", cfg.MemoryProvider)
 	}
 
+	var embedder core.Embedder
+	if cfg.EmbeddingProvider == "ollama" {
+		embedder = llm.NewOllamaEmbedder(cfg.EmbeddingBaseURL, cfg.EmbeddingModel)
+		logger.Info("ollama embeddings configured", "model", cfg.EmbeddingModel)
+	} else if cfg.EmbeddingProvider != "" {
+		logger.Warn("unsupported embedding provider", "provider", cfg.EmbeddingProvider)
+	}
+
 	assistant := core.NewAssistant(llmClient, core.Status{
-		Env:              cfg.Env,
-		LLMProvider:      cfg.LLMProvider,
-		LLMModel:         cfg.LLMModel,
-		AccessRestricted: cfg.TelegramAllowedUserID != "",
-		CalendarEnabled:  calendarClient != nil,
-		VoiceEnabled:     transcribe != nil,
-		MemoryEnabled:    memoryStore != nil,
-		Timezone:         cfg.CalendarTimezone,
-	}, core.WithCalendar(calendarClient), core.WithMemory(memoryStore))
+		Env:               cfg.Env,
+		LLMProvider:       cfg.LLMProvider,
+		LLMModel:          cfg.LLMModel,
+		AccessRestricted:  cfg.TelegramAllowedUserID != "",
+		CalendarEnabled:   calendarClient != nil,
+		VoiceEnabled:      transcribe != nil,
+		MemoryEnabled:     memoryStore != nil,
+		EmbeddingsEnabled: embedder != nil,
+		Timezone:          cfg.CalendarTimezone,
+	}, core.WithCalendar(calendarClient), core.WithMemory(memoryStore), core.WithEmbedder(embedder), core.WithProjectAliases(cfg.ProjectAliases), core.WithAuditLogger(auditLogger))
 
 	if cfg.TelegramBotToken != "" {
 		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, transcribe, logger)

@@ -32,6 +32,11 @@ type Config struct {
 
 	MemoryProvider string
 	DatabaseURL    string
+	ProjectAliases map[string]string
+
+	EmbeddingProvider string
+	EmbeddingBaseURL  string
+	EmbeddingModel    string
 }
 
 func Load() Config {
@@ -62,6 +67,11 @@ func Load() Config {
 
 		MemoryProvider: getenv("MEMORY_PROVIDER", ""),
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		ProjectAliases: parseProjectAliases(os.Getenv("MEMORY_PROJECT_ALIASES")),
+
+		EmbeddingProvider: getenv("EMBEDDING_PROVIDER", ""),
+		EmbeddingBaseURL:  getenv("EMBEDDING_BASE_URL", getenv("LLM_BASE_URL", "http://localhost:11434")),
+		EmbeddingModel:    getenv("EMBEDDING_MODEL", "nomic-embed-text"),
 	}
 }
 
@@ -108,6 +118,32 @@ func splitArgs(value string) []string {
 	}
 
 	return strings.Fields(value)
+}
+
+func parseProjectAliases(value string) map[string]string {
+	out := map[string]string{}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return out
+	}
+
+	groups := strings.Split(value, ";")
+	for _, group := range groups {
+		project, aliases, ok := strings.Cut(group, "=")
+		project = strings.TrimSpace(project)
+		if !ok || project == "" {
+			continue
+		}
+
+		out[project] = project
+		for _, alias := range strings.Split(aliases, ",") {
+			alias = strings.TrimSpace(alias)
+			if alias != "" {
+				out[alias] = project
+			}
+		}
+	}
+	return out
 }
 
 func loadDotEnv(path string) {

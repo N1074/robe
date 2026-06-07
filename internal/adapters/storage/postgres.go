@@ -3,8 +3,11 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +29,10 @@ func NewPostgresMemoryStore(ctx context.Context, databaseURL string) (*PostgresM
 	if err != nil {
 		return nil, err
 	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	store := &PostgresMemoryStore{db: db}
 	if err := store.Migrate(ctx); err != nil {
@@ -73,6 +80,8 @@ ALTER TABLE memories ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding JSONB NULL;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
 
@@ -82,13 +91,54 @@ CREATE TABLE IF NOT EXISTS memory_tags (
 	PRIMARY KEY(memory_id, tag)
 );
 
+CREATE TABLE IF NOT EXISTS audit_events (
+	id BIGSERIAL PRIMARY KEY,
+	occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	actor TEXT NOT NULL,
+	source TEXT NOT NULL,
+	action_type TEXT NOT NULL,
+	risk_level TEXT NOT NULL,
+	decision TEXT NOT NULL,
+	resource_type TEXT NOT NULL DEFAULT '',
+	resource_id TEXT NOT NULL DEFAULT '',
+	summary TEXT NOT NULL DEFAULT '',
+	metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+	result TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS memories_created_at_idx ON memories (created_at DESC);
 CREATE INDEX IF NOT EXISTS memories_text_lower_idx ON memories (lower(text));
 CREATE INDEX IF NOT EXISTS memories_project_idx ON memories (project_id);
 CREATE INDEX IF NOT EXISTS memories_kind_idx ON memories (kind);
 CREATE INDEX IF NOT EXISTS memories_status_idx ON memories (status);
 CREATE INDEX IF NOT EXISTS memory_tags_tag_idx ON memory_tags (tag);
+CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS audit_events_action_type_idx ON audit_events (action_type);
+CREATE INDEX IF NOT EXISTS audit_events_resource_idx ON audit_events (resource_type, resource_id);
 `)
+	return err
+}
+
+func (s *PostgresMemoryStore) RecordAuditEvent(ctx context.Context, event core.AuditEvent) error {
+	occurredAt := event.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+
+	metadata := event.Metadata
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO audit_events (occurred_at, actor, source, action_type, risk_level, decision, resource_type, resource_id, summary, metadata, result, error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+`, occurredAt, nonEmpty(event.Actor, core.ActorSystem), nonEmpty(event.Source, "core"), strings.TrimSpace(event.ActionType), nonEmpty(event.RiskLevel, core.RiskHigh), nonEmpty(event.Decision, core.DecisionDeny), strings.TrimSpace(event.ResourceType), strings.TrimSpace(event.ResourceID), strings.TrimSpace(event.Summary), string(metadataJSON), strings.TrimSpace(event.Result), strings.TrimSpace(event.Error))
 	return err
 }
 
@@ -118,11 +168,16 @@ func (s *PostgresMemoryStore) AddMemory(ctx context.Context, memory core.Memory)
 	}
 
 	var id int64
+	embedding, err := encodeEmbedding(memory.Embedding)
+	if err != nil {
+		return core.Memory{}, err
+	}
+
 	err = s.db.QueryRowContext(ctx, `
-INSERT INTO memories (project_id, kind, text, source, confidence, importance, status, created_at, updated_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO memories (project_id, kind, text, source, confidence, importance, status, embedding, embedding_model, created_at, updated_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
 RETURNING id
-`, projectID, nonEmpty(memory.Kind, "note"), text, source, defaultFloat(memory.Confidence, 1.0), defaultInt(memory.Importance, 3), nonEmpty(memory.Status, "active"), createdAt, nonZeroTime(memory.UpdatedAt, createdAt), expiresAt).Scan(&id)
+`, projectID, nonEmpty(memory.Kind, "note"), text, source, defaultFloat(memory.Confidence, 1.0), defaultInt(memory.Importance, 3), nonEmpty(memory.Status, "active"), embedding, strings.TrimSpace(memory.EmbeddingModel), createdAt, nonZeroTime(memory.UpdatedAt, createdAt), expiresAt).Scan(&id)
 	if err != nil {
 		return core.Memory{}, err
 	}
@@ -146,26 +201,36 @@ RETURNING id
 
 func (s *PostgresMemoryStore) SearchMemories(ctx context.Context, filter core.MemoryFilter) ([]core.Memory, error) {
 	filter.Query = strings.TrimSpace(filter.Query)
-	if filter.Query == "" {
+	if filter.Query == "" && !filter.Semantic {
 		return nil, nil
 	}
 	if filter.Limit <= 0 || filter.Limit > 20 {
 		filter.Limit = 5
 	}
 
+	if filter.Semantic && len(filter.Embedding) > 0 {
+		memories, err := s.searchMemoriesSemantic(ctx, filter)
+		if err != nil || len(memories) > 0 || filter.Query == "" {
+			return memories, err
+		}
+		filter.Semantic = false
+		filter.Embedding = nil
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT m.id, COALESCE(p.id::text, ''), COALESCE(p.slug, ''), COALESCE(p.name, ''),
-       m.kind, m.text, m.source, m.confidence, m.importance, m.status, m.created_at, m.updated_at, m.expires_at
+       m.kind, m.text, m.source, m.confidence, m.importance, m.status, m.embedding, m.embedding_model, m.created_at, m.updated_at, m.expires_at
 FROM memories m
 LEFT JOIN projects p ON p.id = m.project_id
 WHERE m.text ILIKE '%' || $1 || '%'
-  AND ($2 = '' OR p.slug = $2)
+  AND ($2 = '' OR p.slug = $2 OR ($7 AND p.id IS NULL))
   AND ($3 = '' OR m.kind = $3)
   AND ($4 = '' OR m.status = $4)
   AND ($5 = '' OR EXISTS (SELECT 1 FROM memory_tags mt WHERE mt.memory_id = m.id AND mt.tag = $5))
+  AND ($8 = false OR p.id IS NULL)
 ORDER BY m.importance DESC, m.updated_at DESC
 LIMIT $6
-`, filter.Query, filter.ProjectSlug, filter.Kind, filter.Status, filter.Tag, filter.Limit)
+`, filter.Query, filter.ProjectSlug, filter.Kind, filter.Status, filter.Tag, filter.Limit, filter.IncludeGlobal, filter.GlobalOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +241,12 @@ LIMIT $6
 		var id int64
 		var memory core.Memory
 		var expiresAt sql.NullTime
-		if err := rows.Scan(&id, &memory.Project.ID, &memory.Project.Slug, &memory.Project.Name, &memory.Kind, &memory.Text, &memory.Source, &memory.Confidence, &memory.Importance, &memory.Status, &memory.CreatedAt, &memory.UpdatedAt, &expiresAt); err != nil {
+		var embedding []byte
+		if err := rows.Scan(&id, &memory.Project.ID, &memory.Project.Slug, &memory.Project.Name, &memory.Kind, &memory.Text, &memory.Source, &memory.Confidence, &memory.Importance, &memory.Status, &embedding, &memory.EmbeddingModel, &memory.CreatedAt, &memory.UpdatedAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		memory.Embedding, err = decodeEmbedding(embedding)
+		if err != nil {
 			return nil, err
 		}
 		if expiresAt.Valid {
@@ -195,6 +265,110 @@ LIMIT $6
 	}
 
 	return memories, nil
+}
+
+func (s *PostgresMemoryStore) searchMemoriesSemantic(ctx context.Context, filter core.MemoryFilter) ([]core.Memory, error) {
+	memories, err := s.selectMemories(ctx, `
+WHERE ($1 = '' OR p.slug = $1 OR ($5 AND p.id IS NULL))
+  AND ($2 = '' OR m.kind = $2)
+  AND ($3 = '' OR m.status = $3)
+  AND ($4 = '' OR EXISTS (SELECT 1 FROM memory_tags mt WHERE mt.memory_id = m.id AND mt.tag = $4))
+  AND m.embedding IS NOT NULL
+  AND ($6 = false OR p.id IS NULL)
+`, filter.ProjectSlug, filter.Kind, filter.Status, filter.Tag, filter.IncludeGlobal, filter.GlobalOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	type scoredMemory struct {
+		memory core.Memory
+		score  float64
+	}
+	scored := make([]scoredMemory, 0, len(memories))
+	for _, memory := range memories {
+		score := cosineSimilarity(filter.Embedding, memory.Embedding)
+		if score <= 0 {
+			continue
+		}
+		scored = append(scored, scoredMemory{memory: memory, score: score})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].memory.Importance > scored[j].memory.Importance
+		}
+		return scored[i].score > scored[j].score
+	})
+
+	if len(scored) > filter.Limit {
+		scored = scored[:filter.Limit]
+	}
+
+	out := make([]core.Memory, 0, len(scored))
+	for _, item := range scored {
+		out = append(out, item.memory)
+	}
+	return out, nil
+}
+
+func (s *PostgresMemoryStore) GetMemory(ctx context.Context, id string) (core.Memory, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return core.Memory{}, errors.New("memory id is required")
+	}
+
+	memories, err := s.selectMemories(ctx, `
+WHERE m.id = $1
+`, id)
+	if err != nil {
+		return core.Memory{}, err
+	}
+	if len(memories) == 0 {
+		return core.Memory{}, sql.ErrNoRows
+	}
+	return memories[0], nil
+}
+
+func (s *PostgresMemoryStore) ArchiveMemory(ctx context.Context, id string) (core.Memory, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return core.Memory{}, errors.New("memory id is required")
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE memories
+SET status = 'archived', updated_at = now()
+WHERE id = $1
+`, id); err != nil {
+		return core.Memory{}, err
+	}
+
+	return s.GetMemory(ctx, id)
+}
+
+func (s *PostgresMemoryStore) AddMemoryTag(ctx context.Context, id string, tag string) (core.Memory, error) {
+	id = strings.TrimSpace(id)
+	tag = strings.TrimSpace(tag)
+	if id == "" {
+		return core.Memory{}, errors.New("memory id is required")
+	}
+	if tag == "" {
+		return core.Memory{}, errors.New("memory tag is required")
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO memory_tags (memory_id, tag)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`, id, tag); err != nil {
+		return core.Memory{}, err
+	}
+
+	if _, err := s.db.ExecContext(ctx, `UPDATE memories SET updated_at = now() WHERE id = $1`, id); err != nil {
+		return core.Memory{}, err
+	}
+
+	return s.GetMemory(ctx, id)
 }
 
 func (s *PostgresMemoryStore) CreateProject(ctx context.Context, project core.Project) (core.Project, error) {
@@ -296,6 +470,49 @@ func (s *PostgresMemoryStore) tagsForMemory(ctx context.Context, id int64) ([]st
 	return tags, rows.Err()
 }
 
+func (s *PostgresMemoryStore) selectMemories(ctx context.Context, whereSQL string, args ...any) ([]core.Memory, error) {
+	query := `
+SELECT m.id, COALESCE(p.id::text, ''), COALESCE(p.slug, ''), COALESCE(p.name, ''),
+       m.kind, m.text, m.source, m.confidence, m.importance, m.status, m.embedding, m.embedding_model, m.created_at, m.updated_at, m.expires_at
+FROM memories m
+LEFT JOIN projects p ON p.id = m.project_id
+` + whereSQL + `
+ORDER BY m.importance DESC, m.updated_at DESC
+`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memories []core.Memory
+	for rows.Next() {
+		var id int64
+		var memory core.Memory
+		var expiresAt sql.NullTime
+		var embedding []byte
+		if err := rows.Scan(&id, &memory.Project.ID, &memory.Project.Slug, &memory.Project.Name, &memory.Kind, &memory.Text, &memory.Source, &memory.Confidence, &memory.Importance, &memory.Status, &embedding, &memory.EmbeddingModel, &memory.CreatedAt, &memory.UpdatedAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		memory.Embedding, err = decodeEmbedding(embedding)
+		if err != nil {
+			return nil, err
+		}
+		if expiresAt.Valid {
+			memory.ExpiresAt = expiresAt.Time
+		}
+		memory.ID = fmt.Sprintf("%d", id)
+		memory.Tags, err = s.tagsForMemory(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, memory)
+	}
+
+	return memories, rows.Err()
+}
+
 func nonEmpty(value string, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -323,4 +540,47 @@ func nonZeroTime(value time.Time, fallback time.Time) time.Time {
 		return fallback
 	}
 	return value
+}
+
+func encodeEmbedding(embedding []float64) (any, error) {
+	if len(embedding) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(embedding)
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func decodeEmbedding(data []byte) ([]float64, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var embedding []float64
+	if err := json.Unmarshal(data, &embedding); err != nil {
+		return nil, err
+	}
+	return embedding, nil
+}
+
+func cosineSimilarity(a []float64, b []float64) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+
+	var dot float64
+	var normA float64
+	var normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }

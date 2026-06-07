@@ -33,6 +33,113 @@ func NewOllamaClient(baseURL string, model string, numPredict int, temperature f
 	}
 }
 
+type OllamaEmbedder struct {
+	baseURL    string
+	model      string
+	httpClient *http.Client
+}
+
+func NewOllamaEmbedder(baseURL string, model string) *OllamaEmbedder {
+	return &OllamaEmbedder{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		model:   strings.TrimSpace(model),
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
+}
+
+func (e *OllamaEmbedder) Model() string {
+	return e.model
+}
+
+func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, errors.New("embedding text is empty")
+	}
+	if e.model == "" {
+		return nil, errors.New("embedding model is empty")
+	}
+
+	embedding, err := e.embed(ctx, "/api/embed", embedRequest{
+		Model: e.model,
+		Input: text,
+	})
+	if err == nil {
+		return embedding, nil
+	}
+
+	return e.embedLegacy(ctx, text)
+}
+
+func (e *OllamaEmbedder) embed(ctx context.Context, path string, reqBody embedRequest) ([]float64, error) {
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
+	}
+
+	var out embedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Embeddings) == 0 || len(out.Embeddings[0]) == 0 {
+		return nil, errors.New("ollama returned empty embedding")
+	}
+	return out.Embeddings[0], nil
+}
+
+func (e *OllamaEmbedder) embedLegacy(ctx context.Context, text string) ([]float64, error) {
+	payload, err := json.Marshal(legacyEmbedRequest{
+		Model:  e.model,
+		Prompt: text,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/api/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
+	}
+
+	var out legacyEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Embedding) == 0 {
+		return nil, errors.New("ollama returned empty embedding")
+	}
+	return out.Embedding, nil
+}
+
 func (c *OllamaClient) Ask(ctx context.Context, prompt string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", errors.New("prompt is empty")
@@ -110,7 +217,7 @@ func (c *OllamaClient) ParseIntent(ctx context.Context, req core.IntentRequest) 
 					"/no_think\nNow: %s\nTimezone: %s\nUser text: %s",
 					req.Now.Format(time.RFC3339),
 					req.Timezone,
-					req.Text,
+					formatIntentUserText(req),
 				),
 			},
 		},
@@ -157,31 +264,53 @@ Supported actions:
 - calendar_list: user asks to see calendar events. Use period "today", "tomorrow", or "week".
 - calendar_create: user asks to create an appointment/event. Fill title, start, end, location, description. If duration/end is missing, use one hour. Resolve relative dates from Now and Timezone.
 - calendar_delete: user asks to delete a calendar event only when an explicit event id is present. Fill event_id.
+- create_memory: user explicitly asks Robe to remember durable context. Strong signals include "remember that", "recuerda que", "ten en cuenta que", "from now on", "de ahora en adelante", "a partir de ahora". Fill memory fields.
 - ask: ordinary assistant question.
 - none: empty or unclear.
 
 Rules:
 - Never confirm or execute writes.
+- Never create memory unless the user explicitly asks to remember durable context.
+- Do not store passwords, tokens, secrets, credentials, health data, financial identifiers, or irrelevant facts.
+- Memory project should be "global" unless the user clearly mentions a configured project hint.
+- Memory kind must be one of: preference, fact, decision, constraint, task_context, contact_context, operational_note.
 - Never invent an event_id for deletion.
 - Times must be RFC3339.
 - JSON shape:
 {"action":"calendar_create","title":"Dentist","start":"2026-06-07T12:00:00+02:00","end":"2026-06-07T13:00:00+02:00","location":"","description":""}
 {"action":"calendar_delete","event_id":"abc123"}
+{"action":"create_memory","text":"User prefers concise technical answers.","project":"global","kind":"preference","tags":["communication"],"importance":4,"confidence":0.9}
 {"action":"calendar_list","period":"today"}
 {"action":"ask","prompt":"..."}
 {"action":"none"}`
 }
 
+func formatIntentUserText(req core.IntentRequest) string {
+	var b strings.Builder
+	b.WriteString(req.Text)
+	if len(req.ProjectHints) > 0 {
+		b.WriteString("\nConfigured project hints: ")
+		b.WriteString(strings.Join(req.ProjectHints, ", "))
+	}
+	return b.String()
+}
+
 type intentResponse struct {
-	Action      string `json:"action"`
-	Prompt      string `json:"prompt"`
-	Period      string `json:"period"`
-	Title       string `json:"title"`
-	Start       string `json:"start"`
-	End         string `json:"end"`
-	Location    string `json:"location"`
-	Description string `json:"description"`
-	EventID     string `json:"event_id"`
+	Action      string   `json:"action"`
+	Prompt      string   `json:"prompt"`
+	Period      string   `json:"period"`
+	Title       string   `json:"title"`
+	Start       string   `json:"start"`
+	End         string   `json:"end"`
+	Location    string   `json:"location"`
+	Description string   `json:"description"`
+	EventID     string   `json:"event_id"`
+	Text        string   `json:"text"`
+	Project     string   `json:"project"`
+	Kind        string   `json:"kind"`
+	Tags        []string `json:"tags"`
+	Importance  int      `json:"importance"`
+	Confidence  float64  `json:"confidence"`
 }
 
 func decodeIntent(content string) (core.Intent, error) {
@@ -224,6 +353,22 @@ func decodeIntent(content string) (core.Intent, error) {
 		return core.Intent{
 			Kind:            core.IntentCalendarDelete,
 			CalendarEventID: strings.TrimSpace(parsed.EventID),
+		}, nil
+
+	case core.IntentMemoryCreate:
+		return core.Intent{
+			Kind: core.IntentMemoryCreate,
+			MemoryDraft: core.Memory{
+				Project: core.ProjectRef{
+					Slug: strings.TrimSpace(parsed.Project),
+				},
+				Kind:       strings.TrimSpace(parsed.Kind),
+				Text:       strings.TrimSpace(parsed.Text),
+				Tags:       parsed.Tags,
+				Importance: parsed.Importance,
+				Confidence: parsed.Confidence,
+				Status:     "active",
+			},
 		}, nil
 
 	case core.IntentAsk:
@@ -296,4 +441,22 @@ type chatOptions struct {
 
 type chatResponse struct {
 	Message chatMessage `json:"message"`
+}
+
+type embedRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
+}
+
+type embedResponse struct {
+	Embeddings [][]float64 `json:"embeddings"`
+}
+
+type legacyEmbedRequest struct {
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+}
+
+type legacyEmbedResponse struct {
+	Embedding []float64 `json:"embedding"`
 }

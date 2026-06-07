@@ -134,10 +134,10 @@ func (a *Assistant) handleCalendar(ctx context.Context, text string) (string, er
 		return a.listCalendar(ctx, "next 7 days", startOfDay(a.now(), a.location), 7)
 
 	case strings.HasPrefix(arg, "create "):
-		return a.proposeCalendarCreate(strings.TrimSpace(strings.TrimPrefix(arg, "create ")))
+		return a.proposeCalendarCreate(ctx, strings.TrimSpace(strings.TrimPrefix(arg, "create ")))
 
 	case strings.HasPrefix(arg, "delete "):
-		return a.proposeCalendarDelete(strings.TrimSpace(strings.TrimPrefix(arg, "delete ")))
+		return a.proposeCalendarDelete(ctx, strings.TrimSpace(strings.TrimPrefix(arg, "delete ")))
 
 	default:
 		return calendarUsage(), nil
@@ -181,16 +181,16 @@ func (a *Assistant) listCalendar(ctx context.Context, label string, start time.T
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
-func (a *Assistant) proposeCalendarCreate(input string) (string, error) {
+func (a *Assistant) proposeCalendarCreate(ctx context.Context, input string) (string, error) {
 	draft, err := parseCalendarCreate(input, a.location)
 	if err != nil {
 		return err.Error(), nil
 	}
 
-	return a.proposeCalendarCreateDraft(draft)
+	return a.proposeCalendarCreateDraft(ctx, draft)
 }
 
-func (a *Assistant) proposeCalendarCreateDraft(draft CalendarEventDraft) (string, error) {
+func (a *Assistant) proposeCalendarCreateDraft(ctx context.Context, draft CalendarEventDraft) (string, error) {
 	if a.calendar == nil {
 		return calendarNotConfiguredMessage(), nil
 	}
@@ -209,6 +209,19 @@ func (a *Assistant) proposeCalendarCreateDraft(draft CalendarEventDraft) (string
 		return "Calendar event end time must be after start time.", nil
 	}
 
+	permissionAction := calendarAction(ActionCalendarCreate, "", "")
+	decision := a.decide(permissionAction)
+	if decision.Decision == DecisionDeny {
+		err := fmt.Errorf("calendar create denied: %s", decision.Reason)
+		a.recordAudit(ctx, permissionAction, decision, AuditResultRejected, err)
+		return err.Error(), nil
+	}
+	if decision.Decision != DecisionConfirm {
+		err := errors.New("calendar create requires confirmation policy")
+		a.recordAudit(ctx, permissionAction, PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionDeny, Reason: err.Error()}, AuditResultRejected, err)
+		return err.Error(), nil
+	}
+
 	token, err := a.newCalendarToken()
 	if err != nil {
 		return "", err
@@ -221,14 +234,29 @@ func (a *Assistant) proposeCalendarCreateDraft(draft CalendarEventDraft) (string
 		ExpiresAt: a.now().Add(a.pendingTTL),
 	}
 	a.pendingCalendar.put(action)
+	permissionAction.Metadata["token"] = token
+	a.recordAudit(ctx, permissionAction, decision, AuditResultProposed, nil)
 
 	return formatCreateProposal(action), nil
 }
 
-func (a *Assistant) proposeCalendarDelete(eventID string) (string, error) {
+func (a *Assistant) proposeCalendarDelete(ctx context.Context, eventID string) (string, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return "Usage: /calendar delete <event_id>", nil
+	}
+
+	permissionAction := calendarAction(ActionCalendarDelete, "", eventID)
+	decision := a.decide(permissionAction)
+	if decision.Decision == DecisionDeny {
+		err := fmt.Errorf("calendar delete denied: %s", decision.Reason)
+		a.recordAudit(ctx, permissionAction, decision, AuditResultRejected, err)
+		return err.Error(), nil
+	}
+	if decision.Decision != DecisionConfirm {
+		err := errors.New("calendar delete requires confirmation policy")
+		a.recordAudit(ctx, permissionAction, PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionDeny, Reason: err.Error()}, AuditResultRejected, err)
+		return err.Error(), nil
 	}
 
 	token, err := a.newCalendarToken()
@@ -243,6 +271,8 @@ func (a *Assistant) proposeCalendarDelete(eventID string) (string, error) {
 		ExpiresAt: a.now().Add(a.pendingTTL),
 	}
 	a.pendingCalendar.put(action)
+	permissionAction.Metadata["token"] = token
+	a.recordAudit(ctx, permissionAction, decision, AuditResultProposed, nil)
 
 	return formatDeleteProposal(action), nil
 }
@@ -266,16 +296,20 @@ func (a *Assistant) handleConfirm(ctx context.Context, token string) (string, er
 	case "create":
 		event, err := a.calendar.CreateEvent(ctx, action.Draft)
 		if err != nil {
+			a.recordAudit(ctx, calendarAction(ActionCalendarCreate, token, ""), PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm}, AuditResultFailed, err)
 			return "", err
 		}
 		a.pendingCalendar.delete(token)
+		a.recordAudit(ctx, calendarAction(ActionCalendarCreate, token, event.ID), PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm}, AuditResultExecuted, nil)
 		return "Calendar event created:\n" + formatEventDetail(event), nil
 
 	case "delete":
 		if err := a.calendar.DeleteEvent(ctx, action.EventID); err != nil {
+			a.recordAudit(ctx, calendarAction(ActionCalendarDelete, token, action.EventID), PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm}, AuditResultFailed, err)
 			return "", err
 		}
 		a.pendingCalendar.delete(token)
+		a.recordAudit(ctx, calendarAction(ActionCalendarDelete, token, action.EventID), PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm}, AuditResultExecuted, nil)
 		return "Calendar event deleted:\nID: " + action.EventID, nil
 
 	default:
@@ -283,14 +317,23 @@ func (a *Assistant) handleConfirm(ctx context.Context, token string) (string, er
 	}
 }
 
-func (a *Assistant) handleCancel(token string) (string, error) {
+func (a *Assistant) handleCancel(ctx context.Context, token string) (string, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return "Usage: /cancel <token>", nil
 	}
 
+	action, ok := a.pendingCalendar.get(token, a.now())
 	if !a.pendingCalendar.delete(token) {
 		return "No pending action found for token " + token + ".", nil
+	}
+	if ok {
+		actionType := ActionCalendarCreate
+		eventID := action.EventID
+		if action.Kind == "delete" {
+			actionType = ActionCalendarDelete
+		}
+		a.recordAudit(ctx, calendarAction(actionType, token, eventID), PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm}, AuditResultCancelled, nil)
 	}
 
 	return "Cancelled pending action " + token + ".", nil

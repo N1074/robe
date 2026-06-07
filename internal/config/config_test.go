@@ -91,6 +91,14 @@ func TestSplitArgs(t *testing.T) {
 	}
 }
 
+func TestParseProjectAliases(t *testing.T) {
+	got := parseProjectAliases("garden=veg,orchard;writing=novel")
+
+	if got["garden"] != "garden" || got["orchard"] != "garden" || got["veg"] != "garden" || got["novel"] != "writing" {
+		t.Fatalf("unexpected aliases: %#v", got)
+	}
+}
+
 func TestLoadSTTDefaults(t *testing.T) {
 	t.Setenv("STT_PROVIDER", "")
 	t.Setenv("STT_COMMAND", "")
@@ -116,6 +124,10 @@ func TestLoadSTTDefaults(t *testing.T) {
 func TestLoadMemoryDefaults(t *testing.T) {
 	t.Setenv("MEMORY_PROVIDER", "")
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("MEMORY_PROJECT_ALIASES", "")
+	t.Setenv("EMBEDDING_PROVIDER", "")
+	t.Setenv("EMBEDDING_BASE_URL", "")
+	t.Setenv("EMBEDDING_MODEL", "")
 
 	cfg := Load()
 
@@ -124,5 +136,17 @@ func TestLoadMemoryDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "" {
 		t.Fatalf("expected empty database url, got %q", cfg.DatabaseURL)
+	}
+	if len(cfg.ProjectAliases) != 0 {
+		t.Fatalf("expected empty project aliases, got %#v", cfg.ProjectAliases)
+	}
+	if cfg.EmbeddingProvider != "" {
+		t.Fatalf("expected empty embedding provider, got %q", cfg.EmbeddingProvider)
+	}
+	if cfg.EmbeddingModel != "nomic-embed-text" {
+		t.Fatalf("expected default embedding model, got %q", cfg.EmbeddingModel)
+	}
+	if cfg.EmbeddingBaseURL != "http://localhost:11434" {
+		t.Fatalf("expected default embedding base url, got %q", cfg.EmbeddingBaseURL)
 	}
 }

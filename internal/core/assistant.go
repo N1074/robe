@@ -10,12 +10,21 @@ type LLM interface {
 	Ask(ctx context.Context, prompt string) (string, error)
 }
 
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float64, error)
+	Model() string
+}
+
 type Assistant struct {
 	llm             LLM
+	embedder        Embedder
 	intentParser    IntentParser
 	calendar        Calendar
 	memory          MemoryStore
+	permissions     PermissionEngine
+	audit           AuditLogger
 	activeProject   string
+	projectAliases  map[string]string
 	status          Status
 	location        *time.Location
 	pendingTTL      time.Duration
@@ -25,14 +34,15 @@ type Assistant struct {
 }
 
 type Status struct {
-	Env              string
-	LLMProvider      string
-	LLMModel         string
-	AccessRestricted bool
-	CalendarEnabled  bool
-	VoiceEnabled     bool
-	MemoryEnabled    bool
-	Timezone         string
+	Env               string
+	LLMProvider       string
+	LLMModel          string
+	AccessRestricted  bool
+	CalendarEnabled   bool
+	VoiceEnabled      bool
+	MemoryEnabled     bool
+	EmbeddingsEnabled bool
+	Timezone          string
 }
 
 type AssistantOption func(*Assistant)
@@ -55,6 +65,8 @@ func NewAssistant(llm LLM, status Status, opts ...AssistantOption) *Assistant {
 		location:        location,
 		pendingTTL:      10 * time.Minute,
 		pendingCalendar: newPendingCalendarStore(),
+		permissions:     DefaultPermissionEngine{},
+		projectAliases:  map[string]string{},
 		now:             func() time.Time { return time.Now().In(location) },
 		tokenGenerator:  randomToken,
 	}
@@ -81,6 +93,19 @@ func WithMemory(memory MemoryStore) AssistantOption {
 	return func(a *Assistant) {
 		a.memory = memory
 		a.status.MemoryEnabled = memory != nil
+	}
+}
+
+func WithEmbedder(embedder Embedder) AssistantOption {
+	return func(a *Assistant) {
+		a.embedder = embedder
+		a.status.EmbeddingsEnabled = embedder != nil
+	}
+}
+
+func WithProjectAliases(aliases map[string]string) AssistantOption {
+	return func(a *Assistant) {
+		a.projectAliases = normalizeProjectAliases(aliases)
 	}
 }
 
@@ -120,7 +145,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Robe v0.1 online. Try /ping or /ask <question>.", nil
 
 	case text == "/help":
-		return "Commands:\n/ping\n/status\n/ask <question>\n/remember <text>\n/memories <query>\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
+		return "Commands:\n/ping\n/status\n/ask <question>\n/askmem <memory query> | <question>\n/remember <text>\n/memories <query>\n/forget <memory_id>\n/memory show|archive|tag\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
 
 	case text == "/status":
 		return a.renderStatus(), nil
@@ -128,11 +153,20 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 	case text == "/ask" || strings.HasPrefix(text, "/ask "):
 		return a.handleAsk(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/ask")))
 
+	case text == "/askmem" || strings.HasPrefix(text, "/askmem "):
+		return a.handleAskWithMemory(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/askmem")))
+
 	case text == "/remember" || strings.HasPrefix(text, "/remember "):
 		return a.handleRemember(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/remember")))
 
 	case text == "/memories" || strings.HasPrefix(text, "/memories "):
 		return a.handleMemories(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/memories")))
+
+	case text == "/memory" || strings.HasPrefix(text, "/memory "):
+		return a.handleMemory(ctx, text)
+
+	case text == "/forget" || strings.HasPrefix(text, "/forget "):
+		return a.handleForget(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/forget")))
 
 	case text == "/project" || strings.HasPrefix(text, "/project "):
 		return a.handleProject(ctx, text)
@@ -147,7 +181,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return a.handleConfirm(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/confirm")))
 
 	case text == "/cancel" || strings.HasPrefix(text, "/cancel "):
-		return a.handleCancel(strings.TrimSpace(strings.TrimPrefix(text, "/cancel")))
+		return a.handleCancel(ctx, strings.TrimSpace(strings.TrimPrefix(text, "/cancel")))
 
 	default:
 		return a.handleNaturalText(ctx, text)
@@ -190,6 +224,11 @@ func (a *Assistant) renderStatus() string {
 		memory = "enabled"
 	}
 
+	embeddings := "disabled"
+	if a.status.EmbeddingsEnabled {
+		embeddings = "enabled"
+	}
+
 	timezone := strings.TrimSpace(a.status.Timezone)
 	if timezone == "" {
 		timezone = a.location.String()
@@ -200,7 +239,7 @@ func (a *Assistant) renderStatus() string {
 		project = "global"
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nProject: " + project + "\nTimezone: " + timezone
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nEmbeddings: " + embeddings + "\nProject: " + project + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {
@@ -212,5 +251,10 @@ func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error
 		return "LLM is not configured.", nil
 	}
 
-	return a.llm.Ask(ctx, prompt)
+	promptWithMemory, err := a.buildPromptWithRelevantMemory(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	return a.llm.Ask(ctx, promptWithMemory)
 }

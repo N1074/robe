@@ -16,6 +16,13 @@ The repository is intended to become a maintainable orchestration layer for priv
 
 The project should remain simple, explicit and auditable. Avoid turning it into an opaque autonomous agent.
 
+Primary governance references:
+
+- `docs/ARCHITECTURE_GOVERNANCE.md`
+- `docs/ROADMAP.md`
+- `docs/INTENT_PROTOCOL.md`
+- `docs/llm_traits/README.md`
+
 ## Current intended state
 
 The current intended version includes:
@@ -33,7 +40,11 @@ The current intended version includes:
 - Google Calendar read/create/delete commands with explicit confirmation for writes
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
-- manual local memory backed by Postgres
+- structured local memory backed by Postgres
+- LLM-proposed memory creation validated and executed by Robe Core
+- optional Ollama embeddings for memory-assisted LLM retrieval
+- central Core permission engine
+- PostgreSQL audit events for memory writes and calendar write proposals/execution
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -76,6 +87,10 @@ Existing lighter model:
 
     dolphin-mistral:latest
 
+Recommended embedding model:
+
+    nomic-embed-text
+
 ## Development workflow recommendation
 
 GitHub should be the source of truth.
@@ -110,6 +125,8 @@ Server smoke checks after `make run`:
 - Telegram `/calendar delete <event_id>`
 - Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
 - Telegram `/remember <text>` and `/memories <query>`
+- Telegram `/askmem <query> | <question>` when memory is configured; with embeddings enabled it should report used memory IDs
+- Telegram natural memory request with a configured project alias, for example: `recuerda que para garden quiero hablar en kilos, no en cajas`
 - Telegram `/ask responde solo OK`
 - confirm Telegram does not show model thinking text
 - confirm `/status` does not expose tokens or secrets
@@ -142,6 +159,9 @@ At the end of any substantial task:
 
 - update `AGENTS.md` if workflow, architecture, safety model, runtime assumptions or roadmap changed
 - update `README.md` if user-facing behavior, setup, commands, architecture or roadmap changed
+- update `docs/INTENT_PROTOCOL.md` when LLM/Core action JSON changes
+- update `docs/ARCHITECTURE_GOVERNANCE.md` or `docs/ROADMAP.md` when governance, compliance, domain architecture or long-term sequencing changes
+- update `docs/llm_traits` when reusable LLM behavior traits change
 - add or update tests for the behavior that changed
 - run the most appropriate checks and report exactly what passed
 
@@ -170,6 +190,22 @@ Useful Make targets:
 - `make db-logs`: follow Postgres logs
 - `make db-psql`: open psql in the Postgres container
 
+Embedding configuration:
+
+- `EMBEDDING_PROVIDER=ollama` enables explicit memory embeddings
+- `EMBEDDING_BASE_URL` defaults to the Ollama base URL
+- `EMBEDDING_MODEL=nomic-embed-text` is the current recommended local embedding model
+- embeddings are stored with memory rows in Postgres and may be reindexed later if the model changes
+- embeddings support compact context injection; this is not RAG yet
+- embedding failures must not prevent explicit memory storage or ordinary LLM answers; fall back to non-semantic retrieval where practical
+
+Project alias configuration:
+
+- Core must remain project-agnostic; do not hardcode user projects, client names, home/career labels or personal domains in Go code.
+- `MEMORY_PROJECT_ALIASES` is the private runtime place for project inference hints.
+- Format: `project=alias1,alias2;other-project=alias3`.
+- `.env` is not committed, so personal project aliases belong there or in server-side secrets/configuration.
+
 On Windows PowerShell, `make` may not be installed and local script execution may be restricted. Use `powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run`, `google-auth`, `check`, `build`, `health`, `db-up`, `db-down`, `db-logs` or `db-psql` as local equivalents. Keep `make` as the Ubuntu server workflow.
 
 Test coverage should scale with risk:
@@ -178,6 +214,8 @@ Test coverage should scale with risk:
 - adapter behavior should be tested when parsing, filtering or transport-specific behavior changes
 - LLM response cleanup and safety-sensitive logic should have focused tests
 - future confirmation gates, tool execution and audit behavior must be tested before being treated as stable
+- in `internal/core`, keep tests mirrored by code file for readability: `assistant_test.go`, `calendar_test.go`, `intent_test.go`, `memory_test.go` and `governance_test.go`
+- shared core test doubles belong in `test_helpers_test.go`, not at the bottom of a feature test file
 
 Avoid committing secrets.
 
@@ -220,6 +258,16 @@ Target flow:
 
 Tool adapters should remain behind simple interfaces.
 
+Professional architecture rule:
+
+- Core owns orchestration, permissions, validation, state and execution.
+- LLM proposes actions and context transformations.
+- Adapters perform I/O and translate provider-specific APIs.
+- PostgreSQL is the source of truth for durable state.
+- No module should invent its own permission, confirmation or audit model.
+- Personal project aliases, private domains, user-specific labels and secrets must not be hardcoded in Go code or committed documentation.
+- LLM traits are context guidance only; they never grant tool permissions or bypass Core validation.
+
 Planned adapters:
 
 - LLM via Ollama
@@ -229,6 +277,8 @@ Planned adapters:
 - local storage
 - local STT command adapter
 - Postgres memory store
+- Postgres audit event store
+- Ollama embeddings adapter
 - STT/TTS
 - future mobile/glasses bridge
 
@@ -240,6 +290,11 @@ Policy:
 
 - read operations may execute directly when authorized
 - write operations require confirmation
+- memory writes are an exception only when the user explicitly asks Robe to remember durable context
+- the LLM may propose `create_memory`, but Robe Core owns validation, normalization and persistence
+- the LLM must never write directly to Postgres
+- no silent autonomous memory writes unless explicitly enabled in a later design
+- invalid explicit memory proposals should be reported as not saved rather than silently persisted
 - destructive actions are disabled until deliberately implemented
 - email sending requires confirmation
 - email deletion is not allowed in early versions
@@ -249,6 +304,9 @@ Policy:
 - voice-transcribed calendar write intents require the same explicit confirmation tokens as text intents
 - external posting requires confirmation
 - future tool executions should be auditable
+- current memory writes and calendar write proposals/execution are audited when Postgres is configured
+- new side-effecting tools must use the Core permission engine and audit event model instead of inventing local policy
+- PII redaction should be introduced before email/RAG/task ingestion uses external content for memory, prompt injection or indexing
 
 Confirmation flow should eventually look like:
 
@@ -280,9 +338,20 @@ Current commands:
 - natural-language calendar create/list/delete intents parsed by the LLM
 - Telegram voice/audio messages transcribed to text before core handling
 - STT commands should print only the transcript on stdout; logs belong on stderr. Robe also filters common `whisper.cpp` log lines defensively.
-- `/remember <text>` stores manual memory; `/memories <query>` searches manual memory
+- `/remember <text>` stores manual memory; `/memories <query>` searches memory
+- `/askmem <memory query> | <question>` injects bounded, explicit memory context into an LLM answer and reports used memory IDs
+- natural-language memory requests can become `create_memory` intents when explicit phrases are present, such as `recuerda que`, `ten en cuenta que`, `from now on`, `de ahora en adelante` or `a partir de ahora`
+- when embeddings are configured, explicit memory creation stores a vector and normal LLM answers may receive compact relevant memory context
+- embeddings are retrieval metadata, not autonomous memory
+- `/forget <memory_id>` archives a memory; it does not physically delete from Postgres
+- `/memory show <id>`, `/memory tag <id> <tag>` and `/memory archive <id>` support memory curation
 - structured memory supports kind, project scope, tags, source, confidence, importance, status and timestamps
+- supported memory kinds are `preference`, `fact`, `decision`, `constraint`, `task_context`, `contact_context` and `operational_note`
+- project scopes are user-defined through `/project create` and optional private `MEMORY_PROJECT_ALIASES`
 - projects are explicit; global memories have no project
+- side-effecting actions are classified by the Core permission engine
+- audit events are written through a Core-owned `AuditLogger`
+- Postgres persists audit events in `audit_events` when the Postgres store is configured
 
 Core tests should continue to cover:
 
@@ -305,7 +374,14 @@ Core tests should continue to cover:
 - natural-language calendar list intent
 - `/remember` with mock MemoryStore
 - `/memories` with mock MemoryStore
+- `/memory show/tag/archive` with mock MemoryStore
 - project create/use/list behavior with mock MemoryStore
+- memory embeddings and semantic `/askmem` filters with mock Embedder
+- natural-language memory create intent with validation before persistence
+- compact memory retrieval before LLM answers, including global and project-scoped memory
+- rejected memory create proposals for missing explicit intent, sensitive content or unsupported kind
+- permission classification for memory and calendar actions
+- audit records for memory writes, rejected memory proposals, calendar proposals, confirmation execution and cancellation
 
 ## Important current warning
 
@@ -366,8 +442,17 @@ v0.6:
 v0.7:
 
 - manual local memory through Postgres
-- structured project-aware memory before embeddings/RAG
-- project context and RAG as core/tool/storage capabilities, not Telegram logic
+- structured project-aware memory before autonomous memory behavior
+- LLM-proposed memory actions validated and persisted by Robe Core
+- optional embeddings for memory-assisted LLM context
+- project context and future RAG as core/tool/storage capabilities, not Telegram logic
+
+v0.8:
+
+- central permission engine
+- audit event model in Core
+- Postgres `audit_events` persistence
+- audit tests for memory writes and calendar write lifecycle
 
 Later:
 

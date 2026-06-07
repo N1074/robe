@@ -13,6 +13,7 @@ const (
 	IntentCalendarList   = "calendar_list"
 	IntentCalendarCreate = "calendar_create"
 	IntentCalendarDelete = "calendar_delete"
+	IntentMemoryCreate   = "create_memory"
 )
 
 type IntentParser interface {
@@ -20,9 +21,10 @@ type IntentParser interface {
 }
 
 type IntentRequest struct {
-	Text     string
-	Now      time.Time
-	Timezone string
+	Text         string
+	Now          time.Time
+	Timezone     string
+	ProjectHints []string
 }
 
 type Intent struct {
@@ -31,6 +33,7 @@ type Intent struct {
 	CalendarPeriod  string
 	CalendarDraft   CalendarEventDraft
 	CalendarEventID string
+	MemoryDraft     Memory
 }
 
 func (a *Assistant) handleNaturalText(ctx context.Context, text string) (string, error) {
@@ -43,9 +46,10 @@ func (a *Assistant) handleNaturalText(ctx context.Context, text string) (string,
 	}
 
 	intent, err := a.intentParser.ParseIntent(ctx, IntentRequest{
-		Text:     text,
-		Now:      a.now(),
-		Timezone: a.location.String(),
+		Text:         text,
+		Now:          a.now(),
+		Timezone:     a.location.String(),
+		ProjectHints: projectHintList(a.projectAliases),
 	})
 	if err != nil {
 		return a.handleAsk(ctx, text)
@@ -60,10 +64,13 @@ func (a *Assistant) handleIntent(ctx context.Context, intent Intent, originalTex
 		return a.handleCalendarListIntent(ctx, intent.CalendarPeriod)
 
 	case IntentCalendarCreate:
-		return a.proposeCalendarCreateDraft(intent.CalendarDraft)
+		return a.proposeCalendarCreateDraft(ctx, intent.CalendarDraft)
 
 	case IntentCalendarDelete:
-		return a.proposeCalendarDelete(intent.CalendarEventID)
+		return a.proposeCalendarDelete(ctx, intent.CalendarEventID)
+
+	case IntentMemoryCreate:
+		return a.handleMemoryCreateIntent(ctx, intent.MemoryDraft, originalText)
 
 	case IntentAsk, IntentNone, "":
 		prompt := strings.TrimSpace(intent.AskPrompt)
@@ -75,6 +82,31 @@ func (a *Assistant) handleIntent(ctx context.Context, intent Intent, originalTex
 	default:
 		return a.handleAsk(ctx, originalText)
 	}
+}
+
+func (a *Assistant) handleMemoryCreateIntent(ctx context.Context, draft Memory, originalText string) (string, error) {
+	if err := a.validateMemoryProposal(originalText, draft); err != nil {
+		if hasExplicitMemorySignal(originalText) {
+			action := memoryAction(ActionMemoryCreate, draft)
+			action.Actor = ActorLLM
+			action.Source = "telegram/llm"
+			a.recordAudit(ctx, action, PermissionDecision{RiskLevel: RiskLow, Decision: DecisionDeny, Reason: err.Error()}, AuditResultRejected, err)
+			return "Memory was not saved: " + err.Error(), nil
+		}
+		return a.handleAsk(ctx, originalText)
+	}
+
+	draft.Source = "telegram/llm"
+	if draft.Project.Slug == "" {
+		draft.Project.Slug = a.projectForText(originalText)
+	}
+
+	memory, err := a.createMemory(ctx, draft)
+	if err != nil {
+		return "", err
+	}
+
+	return "Memory saved:\n" + formatMemory(memory), nil
 }
 
 func (a *Assistant) handleCalendarListIntent(ctx context.Context, period string) (string, error) {

@@ -4,7 +4,7 @@ Robe is a local-first personal assistant service written in Go.
 
 The project is designed as a small orchestration layer for private assistant workflows: Telegram input, local LLM inference through Ollama, and future adapters for calendar, email, search, voice and visual context.
 
-Current status: **v0.6 development**.
+Current status: **v0.7 development**.
 
 ## Goals
 
@@ -16,6 +16,17 @@ Robe is intended to be:
 - safe by default for sensitive actions
 - easy to run on a home server
 - presentable as a maintainable Go service
+
+## Governance
+
+Architecture and compliance rules live in:
+
+- [Architecture and Governance](docs/ARCHITECTURE_GOVERNANCE.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Intent Protocol](docs/INTENT_PROTOCOL.md)
+- [LLM Traits](docs/llm_traits/README.md)
+
+Short version: the Core owns orchestration, permissions, persistence and execution. The LLM proposes; Core validates and executes. PostgreSQL is the source of truth for durable state.
 
 ## Current capabilities
 
@@ -29,7 +40,10 @@ Implemented:
 - Google Calendar read/create/delete behind confirmation gates
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
-- manual local memory backed by Postgres
+- structured local memory backed by Postgres
+- optional Ollama embeddings for memory-assisted LLM retrieval
+- central permission engine for Core actions
+- PostgreSQL audit trail for memory writes and calendar write proposals/execution
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
@@ -38,11 +52,12 @@ Planned:
 
 - Gmail read-only search and summarization
 - web search adapter
-- audit log
+- PII redaction layer
+- task system
+- coaching system
 - TTS
 - mobile / glasses bridge
-- memory, project context and RAG
-- project context and RAG
+- project context and future RAG
 
 ## Architecture
 
@@ -68,15 +83,16 @@ Core:
 - command and intent routing
 - session handling
 - confirmation gate
-- audit logging
+- permission decisions
+- audit event recording
 
 Tool adapters:
 
 - local LLM via Ollama
+- local embeddings via Ollama
 - Google Calendar
 - Gmail read-only
 - web search
-- local storage
 - Postgres memory store
 
 ## Requirements
@@ -86,6 +102,7 @@ Tool adapters:
 - Telegram bot token
 - Optional local STT command for voice/audio input
 - A local model available in Ollama, currently tested with `qwen3:14b`
+- Optional embedding model in Ollama, for example `nomic-embed-text`
 
 The current Ollama endpoint used by this deployment is:
 
@@ -127,12 +144,17 @@ Example:
 
     MEMORY_PROVIDER=postgres
     DATABASE_URL=postgres://robe:robe_dev_password@localhost:5432/robe?sslmode=disable
+    MEMORY_PROJECT_ALIASES=garden=veg,orchard;writing=novel,draft
+
+    EMBEDDING_PROVIDER=ollama
+    EMBEDDING_BASE_URL=http://172.17.0.1:11434
+    EMBEDDING_MODEL=nomic-embed-text
 
 `.env` must not be committed.
 
 ## Local database
 
-Robe uses Postgres for local memory when `MEMORY_PROVIDER=postgres`.
+Robe uses Postgres for local memory and audit events when `MEMORY_PROVIDER=postgres`.
 
 Start the database:
 
@@ -147,6 +169,34 @@ Useful database commands:
     make db-logs
     make db-psql
     make db-down
+
+## Project aliases
+
+Robe Core is project-agnostic: personal project names and aliases should not be hardcoded in Go code or committed documentation.
+
+Create project records with `/project create <slug> | <name>`. If you want natural language such as "for garden..." to map to a project, configure private aliases in `.env`:
+
+    MEMORY_PROJECT_ALIASES=garden=veg,orchard;writing=novel,draft
+
+The format is `project=alias1,alias2;other-project=alias3`. Keep real personal project aliases in `.env` or server-side configuration, not in the repository.
+
+## Memory embeddings
+
+Embeddings are optional and are intended for LLM context retrieval, not for autonomous memory writes or RAG.
+
+When `EMBEDDING_PROVIDER=ollama` is configured, explicit memory creation stores an embedding alongside the structured memory record. Normal LLM answers, natural conversation and `/askmem <memory query> | <question>` can use semantic similarity to select bounded memory context. PostgreSQL remains the source of truth; the embedding is metadata on the audited memory row.
+
+Install the embedding model on the Ubuntu server:
+
+    ollama pull nomic-embed-text
+
+Then set:
+
+    EMBEDDING_PROVIDER=ollama
+    EMBEDDING_BASE_URL=http://172.17.0.1:11434
+    EMBEDDING_MODEL=nomic-embed-text
+
+Existing memories without embeddings remain searchable by text. If embedding generation fails, Robe still stores explicit memories without a vector and normal answers fall back to non-semantic retrieval. To give old memories semantic retrieval, re-save or backfill them later with an explicit maintenance command.
 
 ## Google Calendar setup
 
@@ -203,8 +253,13 @@ Telegram commands:
 - `/ping`
 - `/status` shows environment, LLM provider/model and access mode
 - `/ask <question>`
+- `/askmem <memory query> | <question>`
 - `/remember <text>`
 - `/memories <query>`
+- `/forget <memory_id>`
+- `/memory show <id>`
+- `/memory archive <id>`
+- `/memory tag <id> <tag>`
 - `/project list`
 - `/project create <slug> | <name>`
 - `/project use <slug>`
@@ -224,6 +279,15 @@ Natural language also works for supported calendar intents. For example:
     que tengo mañana en el calendario
 
 Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
+
+Natural memory requests also work through the normal assistant flow. For example:
+
+    recuerda que para garden quiero hablar en kilos, no en cajas
+    ten en cuenta que para garden quiero hablar en kilos, no en cajas
+
+The LLM may classify these as `create_memory`, but it only proposes the action. Robe Core validates explicit user intent, normalizes project/kind metadata, stores the memory in Postgres and confirms the saved record. The LLM never writes to Postgres directly.
+
+If the proposal is invalid, Robe reports that the memory was not saved instead of silently persisting a malformed record.
 
 Voice messages and audio files sent to Telegram are transcribed first, then processed like normal text. The STT command should print the transcript to stdout. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted; if omitted, Robe appends the audio path as the final argument. Robe filters common `whisper.cpp` log lines defensively, but a transcript-only wrapper is still preferred.
 
@@ -272,8 +336,11 @@ Expected smoke tests:
 - `/ping` replies `pong`
 - `/help` lists the available commands
 - `/status` replies that Robe is online and shows env, LLM and access mode
+- `/status` shows whether memory and embeddings are enabled
 - `/remember the dentist prefers mornings` saves a memory when Postgres is configured
 - `/memories dentist` lists matching memories
+- `/askmem dentist | what should I know before booking?` answers using bounded retrieved memory IDs
+- `recuerda que para garden quiero hablar en kilos, no en cajas` saves a project-scoped memory when `garden` is configured as a project or alias
 - voice message `crea una cita mañana a las 12 con el dentista` returns a heard transcript and a proposal token
 - `/calendar today` lists upcoming events with event IDs
 - `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
@@ -293,7 +360,20 @@ The intended policy is:
 - write operations require explicit confirmation
 - destructive actions are disabled until specifically implemented
 - email deletion, email sending, calendar modification and external posting require confirmation gates
-- all future tool executions should be auditable
+- Core classifies side effects through a permission engine
+- memory writes and calendar write proposals/executions are written to the audit log when Postgres is configured
+- all future tool executions should use the same permission and audit model
+- external content should pass through PII redaction before memory creation, prompt injection, RAG indexing or task generation when practical
+- private project aliases, personal labels and secrets belong in `.env`, server config, secrets or database records, not in committed code
+
+Current Governance policy:
+
+- `internal/core` owns permission decisions and audit event shape
+- memory creation is low risk and allowed only after explicit user intent validation
+- memory archive/tag operations are medium risk local curation actions
+- calendar create/delete are high risk external writes and require confirmation tokens
+- Postgres stores audit events in `audit_events`
+- audit metadata is intentionally compact and must not store raw secrets
 
 Current Calendar policy:
 
@@ -306,22 +386,35 @@ Current Calendar policy:
 
 Current Memory policy:
 
-- memories are saved only through explicit `/remember <text>`
+- memories are saved only through explicit `/remember <text>` or explicit natural-language memory requests
+- natural-language memory creation requires explicit intent such as `recuerda que`, `ten en cuenta que`, `from now on` or `de ahora en adelante`
+- the LLM may request `create_memory`, but Robe Core validates and executes the write
+- the LLM never writes directly to Postgres
 - memory search is explicit through `/memories <query>`
+- memory-assisted answers are explicit through `/askmem <memory query> | <question>`
+- normal `/ask` and natural answers may receive compact relevant memory context before the LLM call
+- embeddings are generated only for explicit memory records and explicit retrieval/context injection
 - memories can be global or project-scoped
-- supported memory kinds: `note`, `preference`, `fact`, `task`, `decision`, `project_knowledge`, `contact`, `operational`
+- supported memory kinds: `preference`, `fact`, `decision`, `constraint`, `task_context`, `contact_context`, `operational_note`
+- project scopes are user-defined through `/project create` and optional private `MEMORY_PROJECT_ALIASES`
 - supported metadata includes kind, project, tags, source, confidence, importance, status and timestamps
-- no automatic memory writes yet
+- no silent autonomous memory writes yet
 - project context and RAG should build on top of this storage layer, not inside Telegram
 
 Structured memory examples:
 
-    /project create robe | Robe
-    /project use robe
-    /remember --kind decision --tags architecture,postgres Use Postgres as Robe's source of truth.
-    /remember --project home --kind preference --tags calendar,dentist Dentist appointments should be in the morning.
-    /memories --project robe --kind decision postgres
+    /project create garden | Garden
+    /project use garden
+    /remember --kind decision --tags architecture,postgres Use Postgres as the source of truth.
+    /remember --project garden --kind preference --tags orders,units Orders should be discussed in kilos.
+    recuerda que para garden quiero hablar en kilos, no en cajas
+    /memories --project garden --kind preference kilos
     /memories --tag dentist appointment
+    /askmem postgres | what storage should Robe use?
+    /forget 12
+    /memory show 12
+    /memory tag 12 architecture
+    /memory archive 12
 
 ## Development roadmap
 
@@ -355,7 +448,11 @@ Voice input through local STT, TTS and mobile bridge.
 
 ### v0.7
 
-Structured, project-aware local memory with Postgres, followed by retrieval-augmented context behind explicit storage/tool boundaries.
+Structured, project-aware local memory with Postgres, LLM-proposed memory actions validated by Robe Core, and optional Ollama embeddings for explicit context injection.
+
+### v0.8
+
+Governance foundation: central permission engine and PostgreSQL audit trail for memory writes and calendar write proposals/execution.
 
 ### Later
 
