@@ -141,7 +141,7 @@ Examples of sensitive content:
 
 The redaction layer should be deterministic and Core-owned. The LLM may help classify content, but Core owns the redaction decision.
 
-Current implementation starts with deterministic redaction of memory context before it is injected into LLM prompts. This protects common emails, phone numbers, card numbers, bank account numbers, signed URLs, OAuth codes and token-like secrets while preserving the original stored memory for user review and curation.
+Current implementation starts with deterministic redaction of memory context before it is injected into LLM prompts. This protects common emails, phone numbers, card numbers, bank account numbers, signed URLs, unsubscribe links, OAuth codes, authorization headers, credential-bearing URLs, private keys, provider tokens and common government IDs while preserving the original stored memory for user review and curation.
 
 ## Memory Governance
 
