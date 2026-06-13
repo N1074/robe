@@ -56,22 +56,6 @@ func TestGetenvFloatReturnsParsedValue(t *testing.T) {
 	}
 }
 
-func TestGetenvBool(t *testing.T) {
-	t.Setenv("ROBE_TEST_BOOL_TRUE", "true")
-	t.Setenv("ROBE_TEST_BOOL_FALSE", "off")
-	t.Setenv("ROBE_TEST_BOOL_INVALID", "maybe")
-
-	if !getenvBool("ROBE_TEST_BOOL_TRUE", false) {
-		t.Fatalf("expected true")
-	}
-	if getenvBool("ROBE_TEST_BOOL_FALSE", true) {
-		t.Fatalf("expected false")
-	}
-	if !getenvBool("ROBE_TEST_BOOL_INVALID", true) {
-		t.Fatalf("expected fallback true")
-	}
-}
-
 func TestSplitCSV(t *testing.T) {
 	got := splitCSV("old-one, old-two ,,")
 	if len(got) != 2 || got[0] != "old-one" || got[1] != "old-two" {
@@ -104,9 +88,6 @@ func TestLoadEmailDefaults(t *testing.T) {
 	t.Setenv("GMAIL_CREDENTIALS_FILE", "")
 	t.Setenv("GMAIL_TOKEN_FILE", "")
 	t.Setenv("GMAIL_USER_ID", "")
-	t.Setenv("EMAIL_REVIEW_ENABLED", "")
-	t.Setenv("EMAIL_REVIEW_DRY_RUN", "")
-	t.Setenv("EMAIL_REVIEW_INTERVAL_MINUTES", "")
 
 	cfg := Load()
 
@@ -121,15 +102,6 @@ func TestLoadEmailDefaults(t *testing.T) {
 	}
 	if cfg.GmailUserID != "me" {
 		t.Fatalf("expected default gmail user id me, got %q", cfg.GmailUserID)
-	}
-	if cfg.EmailReviewEnabled {
-		t.Fatalf("expected email review disabled by default")
-	}
-	if !cfg.EmailReviewDryRun {
-		t.Fatalf("expected email review dry-run by default")
-	}
-	if cfg.EmailReviewInterval.String() != "15m0s" {
-		t.Fatalf("expected 15m interval, got %s", cfg.EmailReviewInterval)
 	}
 }
 

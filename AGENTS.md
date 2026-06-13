@@ -318,7 +318,7 @@ Policy:
 - email review automation must start in dry-run mode with audit records before any scheduler is enabled
 - `CONTACT_ENCRYPTION_KEY` enables encrypted storage for contact private fields; without it, new raw contact identity values should not be persisted in private columns
 - `CONTACT_ENCRYPTION_PREVIOUS_KEYS` allows startup rotation into the current contact encryption key
-- durable multi-account email configuration belongs in Postgres `email_accounts`; the scheduler reads those rows and remains opt-in/dry-run by default
+- durable multi-account email configuration belongs in Postgres `email_accounts`; scheduler implementation is technical debt and must wait until manual dry-run review has been tested carefully
 
 Confirmation flow should eventually look like:
 

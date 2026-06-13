@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -92,7 +91,6 @@ func main() {
 	var memoryStore core.MemoryStore
 	var auditLogger core.AuditLogger
 	var contactDirectory core.ContactDirectory
-	var emailAccountStore core.EmailAccountStore
 	if cfg.MemoryProvider == "postgres" {
 		store, err := storage.NewPostgresMemoryStoreWithOptions(ctx, cfg.DatabaseURL, storage.Options{
 			ContactEncryptionKey:          cfg.ContactEncryptionKey,
@@ -105,7 +103,6 @@ func main() {
 			memoryStore = store
 			auditLogger = store
 			contactDirectory = store
-			emailAccountStore = store
 			if len(cfg.ContactPreviousEncryptionKeys) > 0 && cfg.ContactEncryptionKey != "" {
 				if err := store.RotateContactEncryption(ctx); err != nil {
 					logger.Error("failed to rotate contact encryption", "error", err)
@@ -117,22 +114,6 @@ func main() {
 		}
 	} else if cfg.MemoryProvider != "" {
 		logger.Warn("unsupported memory provider", "provider", cfg.MemoryProvider)
-	}
-
-	if emailAccountStore != nil && cfg.EmailProvider == "gmail" {
-		account, err := emailAccountStore.UpsertEmailAccount(ctx, core.EmailAccount{
-			Provider:          core.EmailAccountProviderGmail,
-			UserID:            cfg.GmailUserID,
-			CredentialsFile:   cfg.GmailCredentialsFile,
-			TokenFile:         cfg.GmailTokenFile,
-			Status:            core.EmailAccountStatusActive,
-			AutoReviewEnabled: cfg.EmailReviewEnabled,
-		})
-		if err != nil {
-			logger.Error("failed to upsert gmail email account", "error", err)
-		} else {
-			logger.Info("gmail email account registered", "account_key", account.AccountKey, "autoreview_enabled", account.AutoReviewEnabled)
-		}
 	}
 
 	var embedder core.Embedder
@@ -172,12 +153,6 @@ func main() {
 		logger.Warn("TELEGRAM_BOT_TOKEN is empty; telegram bot disabled")
 	}
 
-	if cfg.EmailReviewEnabled && emailAccountStore != nil {
-		startEmailReviewScheduler(ctx, logger, emailAccountStore, llmClient, auditLogger, contactDirectory, cfg.EmailReviewInterval, cfg.EmailReviewDryRun)
-	} else if cfg.EmailReviewEnabled {
-		logger.Warn("email review scheduler requested but email account store is not configured")
-	}
-
 	go func() {
 		logger.Info("starting robe-server", "addr", cfg.HTTPAddr, "env", cfg.Env)
 
@@ -203,71 +178,4 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-}
-
-func startEmailReviewScheduler(ctx context.Context, logger *slog.Logger, accounts core.EmailAccountStore, llmClient *llm.OllamaClient, auditLogger core.AuditLogger, contactDirectory core.ContactDirectory, interval time.Duration, dryRun bool) {
-	if interval <= 0 {
-		interval = 15 * time.Minute
-	}
-	run := func() {
-		if err := runEmailReviewOnce(ctx, logger, accounts, llmClient, auditLogger, contactDirectory, dryRun); err != nil {
-			logger.Error("email review run failed", "error", err)
-		}
-	}
-
-	go func() {
-		logger.Info("email review scheduler started", "interval", interval.String(), "dry_run", dryRun)
-		run()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				logger.Info("email review scheduler stopped")
-				return
-			case <-ticker.C:
-				run()
-			}
-		}
-	}()
-}
-
-func runEmailReviewOnce(ctx context.Context, logger *slog.Logger, accounts core.EmailAccountStore, llmClient *llm.OllamaClient, auditLogger core.AuditLogger, contactDirectory core.ContactDirectory, dryRun bool) error {
-	configuredAccounts, err := accounts.ListEmailAccounts(ctx, true)
-	if err != nil {
-		return err
-	}
-	for _, account := range configuredAccounts {
-		if account.Provider != core.EmailAccountProviderGmail {
-			logger.Warn("unsupported email account provider", "account_key", account.AccountKey, "provider", account.Provider)
-			continue
-		}
-		if strings.TrimSpace(account.CredentialsFile) == "" || strings.TrimSpace(account.TokenFile) == "" {
-			logger.Warn("email account missing oauth files", "account_key", account.AccountKey)
-			continue
-		}
-		client, err := gmailadapter.NewGoogleGmail(ctx, gmailadapter.GoogleConfig{
-			CredentialsFile: account.CredentialsFile,
-			TokenFile:       account.TokenFile,
-			UserID:          account.UserID,
-		})
-		if err != nil {
-			logger.Error("failed to configure scheduled gmail account", "account_key", account.AccountKey, "error", err)
-			continue
-		}
-		assistant := core.NewAssistant(
-			llmClient,
-			core.Status{},
-			core.WithEmail(client),
-			core.WithAuditLogger(auditLogger),
-			core.WithContactDirectory(contactDirectory),
-		)
-		results, err := assistant.ReviewUnreadEmails(ctx, core.EmailReviewOptions{DryRun: dryRun, Limit: 10})
-		if err != nil {
-			logger.Error("scheduled email review failed", "account_key", account.AccountKey, "error", err)
-			continue
-		}
-		logger.Info("scheduled email review completed", "account_key", account.AccountKey, "messages", len(results), "dry_run", dryRun)
-	}
-	return nil
 }

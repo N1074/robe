@@ -355,7 +355,7 @@ Set `CONTACT_ENCRYPTION_KEY` before enabling the Postgres contact directory in a
 
 For key rotation, set a new `CONTACT_ENCRYPTION_KEY` and put the old key in `CONTACT_ENCRYPTION_PREVIOUS_KEYS`. On startup, Robe can decrypt values with previous keys and re-encrypt them with the current key.
 
-Email review scheduling is disabled by default. To run the multi-account review loop, set `EMAIL_REVIEW_ENABLED=true`; it bootstraps the Gmail account from `.env` into `email_accounts`, reads active accounts with `autoreview_enabled=true`, and keeps `EMAIL_REVIEW_DRY_RUN=true` by default.
+Email review scheduling is intentionally deferred. Use `/email review dry-run` manually until the review behavior has been tested carefully. `email_accounts` remains as the database foundation for a future multi-account scheduler, but the runtime does not read or execute scheduled account review yet.
 
 ## Quality checks
 
@@ -458,10 +458,10 @@ Current Email policy:
 - sender identity is shown as a safe alias; full sender names and email addresses are Core-private
 - `ContactDirectory` persists raw contact identity locally in Postgres while exposing only safe aliases to Robe/LLM contexts
 - contact private fields are encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured; previous keys can be supplied for rotation
-- Postgres includes `email_accounts` as the durable foundation for multi-account scheduler configuration
+- Postgres includes `email_accounts` as the durable foundation for future multi-account scheduler configuration
 - LLM-proposed contact relationship/category updates are validated by Core before persistence
 - `EmailReviewService` can run unread/unreviewed review in dry-run mode and audit proposed labels before label execution
-- the email scheduler is opt-in, reads `email_accounts`, and defaults to dry-run review
+- the email scheduler is technical debt and remains unimplemented until manual dry-run behavior has been reviewed
 - Gmail messages include a web link so Telegram can open the message in an already-authenticated browser or mobile Gmail session
 - no email sending, deletion, archiving or unsubscribe execution is implemented
 - label mutation is limited to controlled `Robe/...` labels for the future review workflow and must remain Core-owned

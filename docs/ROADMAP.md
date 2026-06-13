@@ -92,15 +92,19 @@ Status: in progress.
 - Postgres contact directory for raw identity and validated relationship metadata
 - encrypted contact private fields when `CONTACT_ENCRYPTION_KEY` is configured
 - contact encryption rotation through previous-key fallback
-- Postgres `email_accounts` driven multi-account review scheduling
+- Postgres `email_accounts` foundation for future multi-account review scheduling
 - LLM-proposed contact profile updates validated by Core
 - email review dry-run with audit records
-- opt-in scheduler with dry-run default
 - email classification
 - summarization
 - task/memory proposals only
 - unsubscribe proposal without execution
 - no sending or deletion
+
+Technical debt:
+
+- implement the email scheduler only after manual dry-run behavior is reviewed
+- scheduler should read `email_accounts`, remain dry-run by default and emit per-account audit/health records
 
 Exit criteria:
 
@@ -109,7 +113,7 @@ Exit criteria:
 - no email send/delete/archive/unsubscribe without explicit confirmation or later policy
 - controlled label mutation is reversible, Core-owned and audited
 - audit records for email-derived proposals
-- scheduler remains opt-in and dry-run by default until review behavior has been inspected
+- scheduler remains unimplemented until manual dry-run review has been inspected
 
 ## Phase 6: RAG And Documents
 

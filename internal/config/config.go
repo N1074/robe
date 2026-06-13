@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type Config struct {
@@ -30,9 +29,6 @@ type Config struct {
 	GmailCredentialsFile string
 	GmailTokenFile       string
 	GmailUserID          string
-	EmailReviewEnabled   bool
-	EmailReviewDryRun    bool
-	EmailReviewInterval  time.Duration
 
 	STTProvider       string
 	STTCommand        string
@@ -76,9 +72,6 @@ func Load() Config {
 		GmailCredentialsFile: os.Getenv("GMAIL_CREDENTIALS_FILE"),
 		GmailTokenFile:       os.Getenv("GMAIL_TOKEN_FILE"),
 		GmailUserID:          getenv("GMAIL_USER_ID", "me"),
-		EmailReviewEnabled:   getenvBool("EMAIL_REVIEW_ENABLED", false),
-		EmailReviewDryRun:    getenvBool("EMAIL_REVIEW_DRY_RUN", true),
-		EmailReviewInterval:  time.Duration(getenvInt("EMAIL_REVIEW_INTERVAL_MINUTES", 15)) * time.Minute,
 
 		STTProvider:       getenv("STT_PROVIDER", ""),
 		STTCommand:        os.Getenv("STT_COMMAND"),
@@ -132,21 +125,6 @@ func getenvFloat(key string, fallback float64) float64 {
 	}
 
 	return parsed
-}
-
-func getenvBool(key string, fallback bool) bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	if value == "" {
-		return fallback
-	}
-	switch value {
-	case "1", "true", "yes", "y", "on":
-		return true
-	case "0", "false", "no", "n", "off":
-		return false
-	default:
-		return fallback
-	}
 }
 
 func splitArgs(value string) []string {

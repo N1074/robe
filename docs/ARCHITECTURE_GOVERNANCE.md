@@ -199,9 +199,9 @@ The Gmail adapter may search, fetch messages and apply controlled `Robe/...` lab
 
 The initial email review taxonomy is intentionally small: reviewed, important, needs-attention, admin, people, online-purchases, finance, projects, notifications and other. Project-specific or user-specific labels should come from database-backed rules, not free-form LLM output.
 
-Email review automation must start in dry-run mode. Dry-run review searches unread messages without `Robe/Reviewed`, proposes controlled labels and records audit events without mutating Gmail. Timed review is opt-in and should remain dry-run until behavior is inspected.
+Email review automation must start in dry-run mode. Dry-run review searches unread messages without `Robe/Reviewed`, proposes controlled labels and records audit events without mutating Gmail. Timed review is deliberately deferred until manual dry-run behavior has been inspected.
 
-Multi-account email support uses durable `email_accounts` rows for provider/account configuration and scheduler flags. Runtime `.env` values may bootstrap a single account, but long-lived multi-account behavior belongs in Postgres, not hardcoded adapter state.
+Multi-account email support should use durable `email_accounts` rows for provider/account configuration and scheduler flags. Runtime `.env` values may bootstrap a single account in a future implementation, but long-lived multi-account behavior belongs in Postgres, not hardcoded adapter state.
 
 ## LLM Trait Packs
 
