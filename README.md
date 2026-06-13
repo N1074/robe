@@ -1,242 +1,253 @@
 # Robe
 
-Robe is a local-first personal assistant service written in Go.
+Robe is a local-first personal assistant service written in Go. It is meant to be a small, explicit and auditable orchestration layer for private assistant workflows, not an opaque autonomous agent.
 
-The project is designed as a small orchestration layer for private assistant workflows: Telegram input, local LLM inference through Ollama, and future adapters for calendar, email, search, voice and visual context.
+Current status: **active development, governance/email phase**.
 
-Current status: **v0.7 development**.
+## What Works Today
 
-## Goals
+- HTTP server with `/health`
+- Telegram bot adapter with optional private access through `TELEGRAM_ALLOWED_USER_ID`
+- Core-owned command handling in `internal/core`
+- Local LLM integration through Ollama
+- `/ask <question>`
+- Google Calendar read/create/delete, with confirmation gates for writes
+- Natural-language calendar intents through the local LLM
+- Telegram voice/audio input through a configurable local STT command
+- Structured memory in Postgres
+- Project-aware memories and private project aliases
+- Optional Ollama embeddings for memory-assisted context
+- Central Core permission engine
+- Postgres audit events for memory writes and calendar write lifecycle
+- Gmail search/show
+- Gmail unread/unreviewed dry-run review through `/email review dry-run`
+- Controlled Gmail review labels under `Robe/...`
+- Safe email display by default, with explicit raw view
+- Core-owned email identity sanitization before LLM use
+- Contact directory foundation in Postgres
+- Optional encryption for contact private fields
+- Email account schema foundation for future multi-account scheduling
 
-Robe is intended to be:
+Not implemented yet:
 
-- local-first where practical
-- explicit about permissions and side effects
-- modular through adapters
-- safe by default for sensitive actions
-- easy to run on a home server
-- presentable as a maintainable Go service
+- email scheduler
+- Telegram email notifications
+- email sending/deletion/archive/unsubscribe
+- web search
+- RAG/document ingestion
+- task system
+- TTS/mobile/glasses bridge
 
 ## Governance
 
-Architecture and compliance rules live in:
+Primary references:
 
 - [Architecture and Governance](docs/ARCHITECTURE_GOVERNANCE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Intent Protocol](docs/INTENT_PROTOCOL.md)
 - [LLM Traits](docs/llm_traits/README.md)
 
-Short version: the Core owns orchestration, permissions, persistence and execution. The LLM proposes; Core validates and executes. PostgreSQL is the source of truth for durable state.
+Short version:
 
-## Current capabilities
+- Core owns orchestration, validation, permissions, persistence and execution.
+- The LLM proposes actions and transformations.
+- Adapters perform I/O.
+- PostgreSQL is the source of truth for durable state.
+- Sensitive external writes require explicit confirmation.
+- Telegram is a transport, not a business-logic layer.
 
-Implemented:
+## Runtime Flow
 
-- HTTP server with `/health`
-- private Telegram bot adapter
-- command handling through `internal/core`
-- `/ping`, `/start`, `/help`, `/status`
-- `/ask <question>` using a local Ollama model
-- Google Calendar read/create/delete behind confirmation gates
-- Gmail search/show commands and controlled label support
-- natural-language intent routing through the local LLM
-- Telegram voice/audio input through configurable local STT
-- structured local memory backed by Postgres
-- optional Ollama embeddings for memory-assisted LLM retrieval
-- central permission engine for Core actions
-- PostgreSQL audit trail for memory writes and calendar write proposals/execution
-- deterministic Core redaction for memory context before LLM prompt injection
-- `.env` based configuration
-- basic project quality commands through `make`
-- config, core command and LLM response cleanup tests
+Text:
 
-Planned:
+```text
+Telegram -> Telegram adapter -> Core assistant -> tools/LLM/storage -> Core response -> Telegram
+```
 
-- Gmail summarization
-- web search adapter
-- broader PII redaction for future email, web and RAG inputs
-- task system
-- coaching system
-- TTS
-- mobile / glasses bridge
-- project context and future RAG
+Voice:
 
-## Architecture
+```text
+Telegram audio -> Telegram adapter -> STT adapter -> Core assistant -> tools/LLM/storage -> Telegram
+```
 
-Current text flow:
+Email review:
 
-Telegram -> Robe Go server -> Telegram adapter -> core assistant -> Ollama LLM adapter -> Local model response -> Telegram reply
-
-Current voice flow:
-
-Telegram voice/audio -> Telegram adapter -> STT adapter -> core assistant -> intent/LLM/tools -> Telegram reply
-
-Architecture:
-
-Input adapters:
-
-- Telegram
-- HTTP / mobile
-- voice through Telegram STT
-- future mobile / glasses bridge
-
-Core:
-
-- command and intent routing
-- session handling
-- confirmation gate
-- permission decisions
-- audit event recording
-
-Tool adapters:
-
-- local LLM via Ollama
-- local embeddings via Ollama
-- Google Calendar
-- Gmail search/show and controlled labels
-- web search
-- Postgres memory store
+```text
+Gmail adapter -> Core redaction/identity sanitization -> optional LLM classification -> Core label/contact proposal -> audit
+```
 
 ## Requirements
 
 - Go 1.25.8+
-- Ollama running locally
-- Telegram bot token
-- Optional local STT command for voice/audio input
-- A local model available in Ollama, currently tested with `qwen3:14b`
-- Optional embedding model in Ollama, for example `nomic-embed-text`
+- Ollama
+- A local model, currently tested with `qwen3:14b`
+- Telegram bot token for Telegram runtime
+- Optional Postgres for memory/audit/contact features
+- Optional Ollama embedding model, recommended `nomic-embed-text`
+- Optional Google OAuth credentials for Calendar and Gmail
+- Optional local STT command for Telegram voice/audio
 
-The current Ollama endpoint used by this deployment is:
+The current server deployment commonly uses:
 
-`http://172.17.0.1:11434`
+```text
+LLM_BASE_URL=http://172.17.0.1:11434
+LLM_MODEL=qwen3:14b
+LLM_NUM_PREDICT=1024
+```
 
-This is useful when Ollama is exposed on the Docker bridge host interface for containers or local services.
+`LLM_NUM_PREDICT=1024` is recommended for `qwen3:14b` because low values can be consumed by internal thinking and produce empty final content.
 
 ## Configuration
 
-Create a local `.env` file from the example:
+Create a local `.env` from the example:
 
-    cp .env.example .env
-    chmod 600 .env
+```bash
+cp .env.example .env
+chmod 600 .env
+```
 
-Example:
+Important settings:
 
-    ROBE_ENV=dev
-    ROBE_HTTP_ADDR=:8080
+```env
+ROBE_ENV=dev
+ROBE_HTTP_ADDR=:8080
 
-    TELEGRAM_BOT_TOKEN=
-    TELEGRAM_ALLOWED_USER_ID=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_ID=
 
-    LLM_PROVIDER=ollama
-    LLM_BASE_URL=http://172.17.0.1:11434
-    LLM_MODEL=qwen3:14b
-    LLM_NUM_PREDICT=1024
-    LLM_TEMPERATURE=0.2
-    PROMPTS_DIR=
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://172.17.0.1:11434
+LLM_MODEL=qwen3:14b
+LLM_NUM_PREDICT=1024
+LLM_TEMPERATURE=0.2
+PROMPTS_DIR=
 
-    CALENDAR_PROVIDER=google
-    CALENDAR_ID=primary
-    CALENDAR_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-calendar-credentials.json
-    CALENDAR_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-calendar-token.json
-    CALENDAR_TIMEZONE=Europe/Madrid
+CALENDAR_PROVIDER=google
+CALENDAR_ID=primary
+CALENDAR_CREDENTIALS_FILE=secrets/google-calendar-credentials.json
+CALENDAR_TOKEN_FILE=secrets/google-calendar-token.json
+CALENDAR_TIMEZONE=Europe/Madrid
 
-    EMAIL_PROVIDER=gmail
-    GMAIL_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-gmail-credentials.json
-    GMAIL_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-gmail-token.json
-    GMAIL_USER_ID=me
+EMAIL_PROVIDER=gmail
+GMAIL_CREDENTIALS_FILE=secrets/google-gmail-credentials.json
+GMAIL_TOKEN_FILE=secrets/google-gmail-token.json
+GMAIL_USER_ID=me
 
-    STT_PROVIDER=command
-    STT_COMMAND=/opt/ai/bin/transcribe-audio
-    STT_ARGS={audio}
-    STT_TIMEOUT_SECONDS=120
+MEMORY_PROVIDER=postgres
+DATABASE_URL=postgres://robe:robe_dev_password@localhost:5432/robe?sslmode=disable
+MEMORY_PROJECT_ALIASES=
+CONTACT_ENCRYPTION_KEY=
+CONTACT_ENCRYPTION_PREVIOUS_KEYS=
 
-    MEMORY_PROVIDER=postgres
-    DATABASE_URL=postgres://robe:robe_dev_password@localhost:5432/robe?sslmode=disable
-    MEMORY_PROJECT_ALIASES=garden=veg,orchard;writing=novel,draft
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_BASE_URL=http://172.17.0.1:11434
+EMBEDDING_MODEL=nomic-embed-text
 
-    EMBEDDING_PROVIDER=ollama
-    EMBEDDING_BASE_URL=http://172.17.0.1:11434
-    EMBEDDING_MODEL=nomic-embed-text
+STT_PROVIDER=command
+STT_COMMAND=
+STT_ARGS={audio}
+STT_TIMEOUT_SECONDS=120
+```
 
-`.env` must not be committed.
+Never commit `.env`, OAuth tokens, bot tokens, local secrets or database files.
 
-`PROMPTS_DIR` is optional. When set, Robe loads `system_chat.txt` and `system_intent.txt` from that directory; otherwise it uses the embedded defaults in `internal/adapters/llm/prompts`.
+## Running
 
-## Local database
+Ubuntu/server workflow:
 
-Robe uses Postgres for local memory and audit events when `MEMORY_PROVIDER=postgres`.
+```bash
+make run
+```
 
-Start the database:
+Windows PowerShell:
 
-    make db-up
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run
+```
 
-On Windows PowerShell:
+Health check:
 
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 db-up
+```bash
+curl http://localhost:8080/health
+```
 
-Useful database commands:
+## Database
 
-    make db-logs
-    make db-psql
-    make db-down
+Postgres is used for:
 
-## Project aliases
+- structured memory
+- projects
+- audit events
+- contact directory
+- future email account configuration
 
-Robe Core is project-agnostic: personal project names and aliases should not be hardcoded in Go code or committed documentation.
+Start local Postgres:
 
-Create project records with `/project create <slug> | <name>`. If you want natural language such as "for garden..." to map to a project, configure private aliases in `.env`:
+```bash
+make db-up
+```
 
-    MEMORY_PROJECT_ALIASES=garden=veg,orchard;writing=novel,draft
+Windows PowerShell:
 
-The format is `project=alias1,alias2;other-project=alias3`. Keep real personal project aliases in `.env` or server-side configuration, not in the repository.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 db-up
+```
 
-## Memory embeddings
+Useful commands:
 
-Embeddings are optional and are intended for LLM context retrieval, not for autonomous memory writes or RAG.
+```bash
+make db-logs
+make db-psql
+make db-down
+```
 
-When `EMBEDDING_PROVIDER=ollama` is configured, explicit memory creation stores an embedding alongside the structured memory record. Normal LLM answers, natural conversation and `/askmem <memory query> | <question>` can use semantic similarity to select bounded memory context. PostgreSQL remains the source of truth; the embedding is metadata on the audited memory row.
+Contact private fields are encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured. This covers fields such as `contacts.full_name`, `contact_addresses.email` and `contact_addresses.display_name_seen`. `CONTACT_ENCRYPTION_PREVIOUS_KEYS` lets Robe decrypt old values during rotation and re-encrypt them with the current key.
 
-Install the embedding model on the Ubuntu server:
+## Google Calendar
 
-    ollama pull nomic-embed-text
+Calendar uses Google OAuth credentials and a local token file.
 
-Then set:
+Generate or refresh the token:
 
-    EMBEDDING_PROVIDER=ollama
-    EMBEDDING_BASE_URL=http://172.17.0.1:11434
-    EMBEDDING_MODEL=nomic-embed-text
+```bash
+make google-auth
+```
 
-Existing memories without embeddings remain searchable by text. If embedding generation fails, Robe still stores explicit memories without a vector and normal answers fall back to non-semantic retrieval. To give old memories semantic retrieval, re-save or backfill them later with an explicit maintenance command.
+Windows PowerShell:
 
-## Google Calendar setup
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
+```
 
-Calendar integration uses Google OAuth credentials and a local token file.
+Calendar writes are never executed directly from the LLM. Create/delete requests produce a pending confirmation token and require `/confirm <token>`.
 
-Generate the token on the server after configuring `CALENDAR_CREDENTIALS_FILE` and `CALENDAR_TOKEN_FILE`:
+## Gmail
 
-    make google-auth
+Gmail currently supports:
 
-On Windows PowerShell:
+- `/email search <query>`
+- `/email show <message_id>`
+- `/email show raw <message_id>`
+- `/email review dry-run`
+- natural-language email search/show when the LLM can parse the intent
 
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
+Gmail does not support sending, deleting, archiving or unsubscribe execution.
 
-Open the printed URL, approve Calendar access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path.
+Generate or refresh the Gmail token:
 
-## Gmail setup
+```bash
+GOOGLE_AUTH_TARGET=gmail make google-auth
+```
 
-Gmail integration supports search, message display and controlled Robe labels for future automated review. It does not send, delete, archive or unsubscribe.
+Windows PowerShell:
 
-Generate the Gmail token after configuring `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE`:
+```powershell
+$env:GOOGLE_AUTH_TARGET="gmail"; powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
+```
 
-    GOOGLE_AUTH_TARGET=gmail make google-auth
+Robe uses Gmail modify scope because controlled review labels may be applied by Core-owned review flows. Existing read-only tokens must be regenerated.
 
-On Windows PowerShell:
-
-    $env:GOOGLE_AUTH_TARGET="gmail"; powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
-
-Open the printed URL, approve Gmail modify access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path. Existing tokens created for read-only Gmail access must be regenerated because Robe now needs label permissions.
-
-Current controlled labels are:
+Controlled labels:
 
 - `Robe/Reviewed`
 - `Robe/Important`
@@ -249,50 +260,20 @@ Current controlled labels are:
 - `Robe/Category/Notifications`
 - `Robe/Category/Other`
 
-These labels are intentionally broad. Project-specific or user-specific labels should come later from database-backed rules, not from free-form LLM output.
+Email identity handling:
 
-Email sender identity is split between Core-private and Robe-facing forms. Core may retain the raw display name and email address for lookup and future contact rules, but prompts, summaries and ordinary Robe responses should use a safe alias. For example, `Maria Sanchez Barroso <maria@example.com>` becomes `Maria S. B.` outside Core. If Gmail provides only an email address, Robe uses `Unknown sender` instead of exposing the local part or domain.
+- `/email show` is safe by default and uses sender/recipient aliases.
+- `/email show raw <message_id>` is the explicit raw escape hatch.
+- LLM email classification uses `EmailMessageForPrompt`, not raw email addresses.
+- Full names and addresses are Core/storage-private.
+- The scheduler is intentionally deferred. Use `/email review dry-run` manually until behavior has been reviewed.
 
-## Telegram setup
-
-Create a bot with `@BotFather`, add the token to `.env`, then start Robe and send a message to the bot.
-
-If `TELEGRAM_ALLOWED_USER_ID` is empty, Robe logs the detected Telegram user ID. Add that value to `.env` to restrict access to your account.
-
-## Running
-
-    make run
-
-On Windows PowerShell:
-
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 run
-
-Build a local binary:
-
-    make build
-
-On Windows PowerShell:
-
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 build
-
-Health check:
-
-    curl http://localhost:8080/health
-
-Or, if the server is already running:
-
-    make health
-
-On Windows PowerShell:
-
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 health
-
-Telegram commands:
+## Telegram Commands
 
 - `/start`
 - `/help`
 - `/ping`
-- `/status` shows environment, LLM provider/model and access mode
+- `/status`
 - `/ask <question>`
 - `/askmem <memory query> | <question>`
 - `/remember <text>`
@@ -318,52 +299,77 @@ Telegram commands:
 - `/confirm <token>`
 - `/cancel <token>`
 
-Natural language also works for supported calendar intents. For example:
+Natural language currently covers:
 
-    crea una cita de calendario para mañana a las 12 con el dentista
-    que tengo mañana en el calendario
+- calendar list/create/delete intents
+- email search/show intents
+- explicit memory creation intents
+- normal assistant questions
 
-Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
+Examples:
 
-Natural language also works for email search when Gmail is configured. For example:
+```text
+crea una cita manana a las 12 con el dentista
+que tengo manana en el calendario
+busca correos sobre facturas
+ensename el correo msg_123
+recuerda que para garden quiero hablar en kilos, no en cajas
+```
 
-    busca correos de alice sobre facturas
-    ensename el correo msg_123
+## Memory
 
-Email natural-language actions are read-only for now. Robe may search or show a specific message ID, but it does not send, delete, archive, label or unsubscribe from natural language.
+Memory is explicit and structured. The LLM may propose `create_memory`, but Core validates and persists it. There are no silent autonomous memory writes.
 
-Natural memory requests also work through the normal assistant flow. For example:
+Examples:
 
-    recuerda que para garden quiero hablar en kilos, no en cajas
-    ten en cuenta que para garden quiero hablar en kilos, no en cajas
+```text
+/project create garden | Garden
+/project use garden
+/remember --kind decision --tags architecture,postgres Use Postgres as the source of truth.
+/remember --project garden --kind preference --tags orders,units Orders should be discussed in kilos.
+/memories --project garden --kind preference kilos
+/askmem postgres | what storage should Robe use?
+/memory show 12
+/memory tag 12 architecture
+/memory archive 12
+```
 
-The LLM may classify these as `create_memory`, but it only proposes the action. Robe Core validates explicit user intent, normalizes project/kind metadata, stores the memory in Postgres and confirms the saved record. The LLM never writes to Postgres directly.
+Embeddings are optional retrieval metadata for explicit memories. They are not RAG and do not create memory by themselves.
 
-If the proposal is invalid, Robe reports that the memory was not saved instead of silently persisting a malformed record.
+## Voice
 
-Voice messages and audio files sent to Telegram are transcribed first, then processed like normal text. The STT command should print the transcript to stdout. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted; if omitted, Robe appends the audio path as the final argument. Robe filters common `whisper.cpp` log lines defensively, but a transcript-only wrapper is still preferred.
+Telegram voice/audio messages are transcribed through a configured local command and then handled like text.
 
-For `whisper.cpp`, make the wrapper print only the transcript on stdout. Keep logs on stderr and use `-np -nt`:
+The STT command should print only the transcript on stdout. Logs belong on stderr. Use `{audio}` in `STT_ARGS` where the downloaded audio path should be inserted.
 
-    /opt/ai/src/whisper.cpp/build/bin/whisper-cli -m /opt/ai/models/ggml-small.bin -f "$TMP_WAV" -l es -np -nt
+Example wrapper target for `whisper.cpp`:
 
-If Robe replies that Calendar is not configured yet, calendar OAuth/config is not active. Set `CALENDAR_PROVIDER=google`, credentials/token paths and restart Robe.
+```bash
+/opt/ai/src/whisper.cpp/build/bin/whisper-cli -m /opt/ai/models/ggml-small.bin -f "$TMP_WAV" -l es -np -nt
+```
 
-If Robe replies that Email is not configured yet, Gmail OAuth/config is not active. Set `EMAIL_PROVIDER=gmail`, Gmail credentials/token paths and restart Robe.
+## Safety Model
 
-Set `CONTACT_ENCRYPTION_KEY` before enabling the Postgres contact directory in a real mailbox. Robe stores a deterministic address hash for lookup and stores contact private fields such as `contacts.full_name`, `contact_addresses.email` and `contact_addresses.display_name_seen` encrypted with AES-GCM when this key is present. Without the key, new raw contact identity values are not persisted in those private columns.
+- Read operations may execute directly for the authorized user.
+- Calendar create/delete require confirmation.
+- Email send/delete/archive/unsubscribe are not implemented.
+- Email label mutation is limited to controlled `Robe/...` labels through Core review flows.
+- Memory writes require explicit user intent and Core validation.
+- New side-effecting tools must use the Core permission engine and audit model.
+- External content should pass through Core redaction before LLM use when practical.
+- Audit metadata must stay compact and must not store secrets.
 
-For key rotation, set a new `CONTACT_ENCRYPTION_KEY` and put the old key in `CONTACT_ENCRYPTION_PREVIOUS_KEYS`. On startup, Robe can decrypt values with previous keys and re-encrypt them with the current key.
+## Quality Checks
 
-Email review scheduling is intentionally deferred. Use `/email review dry-run` manually until the review behavior has been tested carefully. `email_accounts` remains as the database foundation for a future multi-account scheduler, but the runtime does not read or execute scheduled account review yet.
+```bash
+make check
+```
 
-## Quality checks
+Windows PowerShell:
 
-    make check
-
-On Windows PowerShell:
-
-    powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 check
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 check
+```
 
 This runs:
 
@@ -371,172 +377,39 @@ This runs:
 - `go test ./...`
 - `go vet ./...`
 
-For substantial changes, keep tests and documentation in step with the code:
+## Server Update Checklist
 
-- update core tests when command behavior changes
-- add focused tests for LLM cleanup and safety-sensitive logic
-- update this README when setup, commands, architecture or roadmap changes
-- update `AGENTS.md` when workflow, safety assumptions or architecture direction changes
+```bash
+cd /opt/ai/projects/robe
+git pull --ff-only
+make check
+make run
+```
 
-## Server update checklist
+Smoke tests:
 
-On the Ubuntu server:
+- `curl http://localhost:8080/health`
+- Telegram `/ping`
+- Telegram `/help`
+- Telegram `/status`
+- Telegram `/calendar today`
+- Telegram `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15`
+- Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
+- Telegram `/remember test memory`
+- Telegram `/memories test`
+- Telegram `/ask responde solo OK`
+- Telegram `/email search newer_than:7d` when Gmail is configured
+- Telegram `/email review dry-run` when Gmail is configured
 
-    cd /opt/ai/projects/robe
-    git pull --ff-only
-    make check
-    make run
+## Roadmap
 
-In another terminal, verify:
+The detailed roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-    curl http://localhost:8080/health
+Near-term focus:
 
-Expected smoke tests:
+- keep Phase 3/4 memory, governance and audit foundations tight
+- complete Phase 5 email review manually before any scheduler
+- split/refactor Postgres storage by domain for auditability
+- add stronger Postgres migration/integration coverage
+- keep future scheduler, tasks, RAG and notifications behind explicit design gates
 
-- `/ping` replies `pong`
-- `/help` lists the available commands
-- `/status` replies that Robe is online and shows env, LLM and access mode
-- `/status` shows whether memory and embeddings are enabled
-- `/remember the dentist prefers mornings` saves a memory when Postgres is configured
-- `/memories dentist` lists matching memories
-- `/askmem dentist | what should I know before booking?` answers using bounded retrieved memory IDs
-- `recuerda que para garden quiero hablar en kilos, no en cajas` saves a project-scoped memory when `garden` is configured as a project or alias
-- voice message `crea una cita mañana a las 12 con el dentista` returns a heard transcript and a proposal token
-- `/calendar today` lists upcoming events with event IDs
-- `/calendar create Test | 2026-06-07 10:00 | 2026-06-07 10:15` returns a proposal and token, not a created event
-- `/calendar delete <event_id>` returns a proposal and token, not a deleted event
-- `crea una cita mañana a las 12 con el dentista` returns a proposal and token, not a created event
-- `/confirm <token>` executes the proposed create/delete
-- `/email review dry-run` lists proposed labels/contact metadata without mutating Gmail
-- `/ask responde solo OK` returns a final answer without thinking text
-- an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
-
-## Safety model
-
-Robe should not allow the LLM to directly execute sensitive actions.
-
-The intended policy is:
-
-- read operations may be executed directly when authorized
-- write operations require explicit confirmation
-- destructive actions are disabled until specifically implemented
-- email deletion, email sending, calendar modification and external posting require confirmation gates
-- current email commands are read-only; label mutation is reserved for the Core-owned review workflow
-- Core classifies side effects through a permission engine
-- memory writes and calendar write proposals/executions are written to the audit log when Postgres is configured
-- memory context injected into LLM prompts is deterministically redacted for common PII and secrets
-- Core exposes `RedactExternalContentForPrompt` as the redaction contract for future email, web and RAG content before LLM prompt injection
-- all future tool executions should use the same permission and audit model
-- external content should pass through PII redaction before memory creation, prompt injection, RAG indexing or task generation when practical
-- private project aliases, personal labels and secrets belong in `.env`, server config, secrets or database records, not in committed code
-
-Current Governance policy:
-
-- `internal/core` owns permission decisions and audit event shape
-- memory creation is low risk and allowed only after explicit user intent validation
-- memory archive/tag operations are medium risk local curation actions
-- calendar create/delete are high risk external writes and require confirmation tokens
-- Postgres stores audit events in `audit_events`
-- audit metadata is intentionally compact and must not store raw secrets
-
-Current Calendar policy:
-
-- calendar reads execute directly for the authorized Telegram user
-- calendar create requires `/confirm <token>`
-- calendar delete requires `/confirm <token>`
-- natural-language calendar create/delete also require `/confirm <token>`
-- voice calendar create/delete also require `/confirm <token>`
-- ambiguous confirmations such as "yes" are ignored
-
-Current Email policy:
-
-- Gmail access uses the modify OAuth scope so Robe can apply controlled review labels
-- `/email search <query>` lists matching message IDs and snippets
-- `/email show <message_id>` displays a safe view of a single message with sender/recipient aliases and redacted content
-- `/email show raw <message_id>` is the explicit escape hatch for the raw message body and raw participants
-- natural-language email search/show routes through the same read-only Core interface
-- sender identity is shown as a safe alias; full sender names and email addresses are Core-private
-- `ContactDirectory` persists raw contact identity locally in Postgres while exposing only safe aliases to Robe/LLM contexts
-- contact private fields are encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured; previous keys can be supplied for rotation
-- Postgres includes `email_accounts` as the durable foundation for future multi-account scheduler configuration
-- LLM-proposed contact relationship/category updates are validated by Core before persistence
-- `EmailReviewService` can run unread/unreviewed review in dry-run mode and audit proposed labels before label execution
-- the email scheduler is technical debt and remains unimplemented until manual dry-run behavior has been reviewed
-- Gmail messages include a web link so Telegram can open the message in an already-authenticated browser or mobile Gmail session
-- no email sending, deletion, archiving or unsubscribe execution is implemented
-- label mutation is limited to controlled `Robe/...` labels for the future review workflow and must remain Core-owned
-- future email summarization must pass email content and sender identity through Core sanitization/redaction before LLM use
-
-Current Memory policy:
-
-- memories are saved only through explicit `/remember <text>` or explicit natural-language memory requests
-- natural-language memory creation requires explicit intent such as `recuerda que`, `ten en cuenta que`, `from now on` or `de ahora en adelante`
-- the LLM may request `create_memory`, but Robe Core validates and executes the write
-- the LLM never writes directly to Postgres
-- memory search is explicit through `/memories <query>`
-- memory-assisted answers are explicit through `/askmem <memory query> | <question>`
-- normal `/ask` and natural answers may receive compact relevant memory context before the LLM call
-- embeddings are generated only for explicit memory records and explicit retrieval/context injection
-- memories can be global or project-scoped
-- supported memory kinds: `preference`, `fact`, `decision`, `constraint`, `task_context`, `contact_context`, `operational_note`
-- project scopes are user-defined through `/project create` and optional private `MEMORY_PROJECT_ALIASES`
-- supported metadata includes kind, project, tags, source, confidence, importance, status and timestamps
-- no silent autonomous memory writes yet
-- project context and RAG should build on top of this storage layer, not inside Telegram
-
-Structured memory examples:
-
-    /project create garden | Garden
-    /project use garden
-    /remember --kind decision --tags architecture,postgres Use Postgres as the source of truth.
-    /remember --project garden --kind preference --tags orders,units Orders should be discussed in kilos.
-    recuerda que para garden quiero hablar en kilos, no en cajas
-    /memories --project garden --kind preference kilos
-    /memories --tag dentist appointment
-    /askmem postgres | what storage should Robe use?
-    /forget 12
-    /memory show 12
-    /memory tag 12 architecture
-    /memory archive 12
-
-## Development roadmap
-
-### v0.1
-
-Local Telegram assistant using Ollama.
-
-### v0.1.1
-
-Thin Telegram adapter, core assistant command handling, safer `/status`, core tests and LLM thinking cleanup.
-
-### v0.2
-
-Google Calendar read support.
-
-### v0.3
-
-Calendar event creation and deletion with explicit confirmation tokens.
-
-### v0.4
-
-Gmail search/show, controlled review labels and thread summarization.
-
-### v0.5
-
-Web search adapter.
-
-### v0.6
-
-Voice input through local STT, TTS and mobile bridge.
-
-### v0.7
-
-Structured, project-aware local memory with Postgres, LLM-proposed memory actions validated by Robe Core, and optional Ollama embeddings for explicit context injection.
-
-### v0.8
-
-Governance foundation: central permission engine and PostgreSQL audit trail for memory writes and calendar write proposals/execution.
-
-### Later
-
-Ray-Ban / glasses bridge as an input-output adapter, not as the core of the assistant.
