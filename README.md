@@ -134,7 +134,7 @@ GMAIL_TOKEN_FILE=secrets/google-gmail-token.json
 GMAIL_USER_ID=me
 
 MEMORY_PROVIDER=postgres
-DATABASE_URL=postgres://robe:robe_dev_password@localhost:5432/robe?sslmode=disable
+DATABASE_URL=postgres://robe:<local-dev-password>@localhost:5432/robe?sslmode=disable
 MEMORY_PROJECT_ALIASES=
 CONTACT_ENCRYPTION_KEY=
 CONTACT_ENCRYPTION_PREVIOUS_KEYS=
@@ -245,7 +245,7 @@ Windows PowerShell:
 $env:GOOGLE_AUTH_TARGET="gmail"; powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
 ```
 
-Robe uses Gmail modify scope because controlled review labels may be applied by Core-owned review flows. Existing read-only tokens must be regenerated.
+Robe uses Gmail modify scope only because controlled `Robe/...` review labels may be applied by Core-owned review flows. It still does not implement email send, delete, archive or unsubscribe. Existing read-only tokens must be regenerated for label support. A future read-only mode can split search/show from label review.
 
 Controlled labels:
 
@@ -313,7 +313,7 @@ crea una cita manana a las 12 con el dentista
 que tengo manana en el calendario
 busca correos sobre facturas
 ensename el correo msg_123
-recuerda que para garden quiero hablar en kilos, no en cajas
+recuerda que para example-project quiero hablar en kilos, no en cajas
 ```
 
 ## Memory
@@ -323,11 +323,11 @@ Memory is explicit and structured. The LLM may propose `create_memory`, but Core
 Examples:
 
 ```text
-/project create garden | Garden
-/project use garden
+/project create example-project | Example Project
+/project use example-project
 /remember --kind decision --tags architecture,postgres Use Postgres as the source of truth.
-/remember --project garden --kind preference --tags orders,units Orders should be discussed in kilos.
-/memories --project garden --kind preference kilos
+/remember --project example-project --kind preference --tags orders,units Orders should be discussed in kilos.
+/memories --project example-project --kind preference kilos
 /askmem postgres | what storage should Robe use?
 /memory show 12
 /memory tag 12 architecture
@@ -412,4 +412,3 @@ Near-term focus:
 - split/refactor Postgres storage by domain for auditability
 - add stronger Postgres migration/integration coverage
 - keep future scheduler, tasks, RAG and notifications behind explicit design gates
-

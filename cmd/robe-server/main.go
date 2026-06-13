@@ -103,13 +103,6 @@ func main() {
 			memoryStore = store
 			auditLogger = store
 			contactDirectory = store
-			if len(cfg.ContactPreviousEncryptionKeys) > 0 && cfg.ContactEncryptionKey != "" {
-				if err := store.RotateContactEncryption(ctx); err != nil {
-					logger.Error("failed to rotate contact encryption", "error", err)
-				} else {
-					logger.Info("contact encryption rotation completed")
-				}
-			}
 			logger.Info("postgres memory configured")
 		}
 	} else if cfg.MemoryProvider != "" {

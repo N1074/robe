@@ -36,6 +36,7 @@ type EmailReviewResult struct {
 	WebURL          string
 	DryRun          bool
 	ContactProposal ContactProfileProposal
+	ContactError    string
 }
 
 func (a *Assistant) handleEmailReviewDryRun(ctx context.Context) (string, error) {
@@ -123,7 +124,9 @@ func (a *Assistant) ReviewUnreadEmails(ctx context.Context, opts EmailReviewOpti
 			return results, err
 		}
 		a.recordAudit(ctx, action, decision, AuditResultExecuted, nil)
-		a.persistContactProposalIfPresent(ctx, message, result)
+		if err := a.persistContactProposalIfPresent(ctx, message, result); err != nil {
+			results[len(results)-1].ContactError = err.Error()
+		}
 	}
 
 	return results, nil
@@ -221,23 +224,24 @@ func validEmailReviewLabels(labels []string) []string {
 	return uniqueStrings(out)
 }
 
-func (a *Assistant) persistContactProposalIfPresent(ctx context.Context, message EmailMessage, result EmailReviewResult) {
+func (a *Assistant) persistContactProposalIfPresent(ctx context.Context, message EmailMessage, result EmailReviewResult) error {
 	if a.contactDirectory == nil {
-		return
+		return nil
 	}
 	proposal := contactProposalForReview(message, result)
 	if contactProposalIsEmpty(proposal) {
-		return
+		return nil
 	}
 	contact, err := a.contactDirectory.UpsertEmailContact(ctx, message.FromIdentity)
 	if err != nil {
-		return
+		return err
 	}
 	proposal.ContactID = contact.ID
 	if strings.TrimSpace(proposal.Alias) == "" {
 		proposal.Alias = contact.Alias
 	}
-	_, _ = a.ApplyContactProfileProposal(ctx, proposal)
+	_, err = a.ApplyContactProfileProposal(ctx, proposal)
+	return err
 }
 
 func (a *Assistant) auditContactProposalIfPresent(ctx context.Context, message EmailMessage, result EmailReviewResult) {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -163,5 +164,39 @@ func TestReviewUnreadEmailsApplyPersistsValidatedContactProposal(t *testing.T) {
 
 	if len(directory.contacts) == 0 || directory.proposal.Relationship != ContactRelationshipAdmin {
 		t.Fatalf("expected contact proposal persisted, got contacts=%#v proposal=%#v", directory.contacts, directory.proposal)
+	}
+}
+
+func TestReviewUnreadEmailsReportsContactProposalError(t *testing.T) {
+	email := &mockEmail{
+		messages: []EmailMessage{
+			{
+				ID:           "msg_1",
+				FromIdentity: ParseEmailIdentity(`"Agencia Tributaria" <notice@example.gob>`),
+				Subject:      "Official notice",
+			},
+		},
+	}
+	classifier := &mockEmailClassifier{
+		classification: EmailClassification{
+			Labels: []string{EmailLabelReviewed, EmailLabelAdmin},
+			ContactProposal: ContactProfileProposal{
+				Kind:         ContactKindOrganization,
+				Relationship: ContactRelationshipAdmin,
+				Importance:   4,
+				Confidence:   0.8,
+				Reason:       "official notice",
+			},
+		},
+	}
+	directory := &mockContactDirectory{applyErr: errors.New("contact store unavailable")}
+	assistant := NewAssistant(nil, Status{}, WithEmail(email), WithEmailClassifier(classifier), WithContactDirectory(directory), WithAuditLogger(&mockAuditLogger{}))
+
+	results, err := assistant.ReviewUnreadEmails(context.Background(), EmailReviewOptions{})
+	if err != nil {
+		t.Fatalf("expected no review error, got %v", err)
+	}
+	if len(results) != 1 || !strings.Contains(results[0].ContactError, "contact store unavailable") {
+		t.Fatalf("expected contact error in result, got %#v", results)
 	}
 }

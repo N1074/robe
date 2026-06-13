@@ -93,11 +93,16 @@ func (m *mockEmail) ApplyEmailLabels(ctx context.Context, messageID string, labe
 }
 
 type mockContactDirectory struct {
-	contacts []Contact
-	proposal ContactProfileProposal
+	contacts  []Contact
+	proposal  ContactProfileProposal
+	upsertErr error
+	applyErr  error
 }
 
 func (m *mockContactDirectory) UpsertEmailContact(ctx context.Context, identity EmailIdentity) (Contact, error) {
+	if m.upsertErr != nil {
+		return Contact{}, m.upsertErr
+	}
 	contact := Contact{
 		ID:           "contact_1",
 		Alias:        identity.Alias,
@@ -112,6 +117,9 @@ func (m *mockContactDirectory) UpsertEmailContact(ctx context.Context, identity 
 }
 
 func (m *mockContactDirectory) ApplyContactProfileProposal(ctx context.Context, proposal ContactProfileProposal) (Contact, error) {
+	if m.applyErr != nil {
+		return Contact{}, m.applyErr
+	}
 	m.proposal = proposal
 	contact := Contact{
 		ID:           nonEmpty(proposal.ContactID, "contact_1"),

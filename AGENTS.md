@@ -128,7 +128,7 @@ Server smoke checks after `make run`:
 - Telegram `/pending`, `/confirm <token>`, `/cancel <token>`
 - Telegram `/remember <text>` and `/memories <query>`
 - Telegram `/askmem <query> | <question>` when memory is configured; with embeddings enabled it should report used memory IDs
-- Telegram natural memory request with a configured project alias, for example: `recuerda que para garden quiero hablar en kilos, no en cajas`
+- Telegram natural memory request with a configured project alias, for example: `recuerda que para example-project quiero hablar en kilos, no en cajas`
 - Telegram `/ask responde solo OK`
 - confirm Telegram does not show model thinking text
 - confirm `/status` does not expose tokens or secrets
@@ -317,7 +317,7 @@ Policy:
 - contact relationship/category proposals from the LLM must be validated by Core before writing to `ContactDirectory`
 - email review automation must start in dry-run mode with audit records before any scheduler is enabled
 - `CONTACT_ENCRYPTION_KEY` enables encrypted storage for contact private fields; without it, new raw contact identity values should not be persisted in private columns
-- `CONTACT_ENCRYPTION_PREVIOUS_KEYS` allows startup rotation into the current contact encryption key
+- `CONTACT_ENCRYPTION_PREVIOUS_KEYS` allows explicit contact encryption rotation into the current key; do not run rotation automatically during normal startup
 - durable multi-account email configuration belongs in Postgres `email_accounts`; scheduler implementation is technical debt and must wait until manual dry-run review has been tested carefully
 
 Confirmation flow should eventually look like:
@@ -448,7 +448,7 @@ v0.3.1:
 
 v0.4:
 
-- Gmail search/show, controlled review labels and summarization
+- Gmail search/show, controlled review labels and initial review summaries
 
 v0.5:
 

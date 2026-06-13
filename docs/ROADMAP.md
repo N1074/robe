@@ -96,7 +96,7 @@ Status: in progress.
 - LLM-proposed contact profile updates validated by Core
 - email review dry-run with audit records
 - email classification
-- summarization
+- initial review summaries
 - task/memory proposals only
 - unsubscribe proposal without execution
 - no sending or deletion

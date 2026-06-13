@@ -157,7 +157,7 @@ The LLM may categorize relationships or propose contact metadata from sanitized 
 
 Contact private fields such as `contacts.full_name`, `contact_addresses.email` and `contact_addresses.display_name_seen` must be encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured. The deterministic `address_hash` supports local lookup without exposing the address. If the encryption key is missing, Core storage should avoid persisting new plaintext private identity values.
 
-Contact encryption rotation uses `CONTACT_ENCRYPTION_KEY` as the current write key and `CONTACT_ENCRYPTION_PREVIOUS_KEYS` as read-only fallback keys. Rotation should decrypt with current/previous keys and re-encrypt with the current key without sending private identity values to the LLM.
+Contact encryption rotation uses `CONTACT_ENCRYPTION_KEY` as the current write key and `CONTACT_ENCRYPTION_PREVIOUS_KEYS` as read-only fallback keys. Rotation should be an explicit maintenance operation: decrypt with current/previous keys and re-encrypt with the current key without sending private identity values to the LLM. It should not run as a hidden side effect of normal service startup.
 
 ## Memory Governance
 
