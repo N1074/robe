@@ -155,7 +155,9 @@ The LLM may categorize relationships or propose contact metadata from sanitized 
 
 `ContactDirectory` is the Core-owned boundary for contact identity. PostgreSQL may store raw display names and email addresses locally for lookup, but normal Robe responses, prompt context and notifications use aliases.
 
-`contact_addresses.email` must be encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured. The deterministic `address_hash` supports local lookup without exposing the address. If the encryption key is missing, Core storage should avoid persisting plaintext email addresses.
+Contact private fields such as `contacts.full_name`, `contact_addresses.email` and `contact_addresses.display_name_seen` must be encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured. The deterministic `address_hash` supports local lookup without exposing the address. If the encryption key is missing, Core storage should avoid persisting new plaintext private identity values.
+
+Contact encryption rotation uses `CONTACT_ENCRYPTION_KEY` as the current write key and `CONTACT_ENCRYPTION_PREVIOUS_KEYS` as read-only fallback keys. Rotation should decrypt with current/previous keys and re-encrypt with the current key without sending private identity values to the LLM.
 
 ## Memory Governance
 
@@ -197,9 +199,9 @@ The Gmail adapter may search, fetch messages and apply controlled `Robe/...` lab
 
 The initial email review taxonomy is intentionally small: reviewed, important, needs-attention, admin, people, online-purchases, finance, projects, notifications and other. Project-specific or user-specific labels should come from database-backed rules, not free-form LLM output.
 
-Email review automation must start in dry-run mode. Dry-run review searches unread messages without `Robe/Reviewed`, proposes controlled labels and records audit events without mutating Gmail. Timed review should not be enabled until dry-run behavior is inspected.
+Email review automation must start in dry-run mode. Dry-run review searches unread messages without `Robe/Reviewed`, proposes controlled labels and records audit events without mutating Gmail. Timed review is opt-in and should remain dry-run until behavior is inspected.
 
-Multi-account email support should use durable `email_accounts` rows for provider/account configuration and scheduler flags. Runtime `.env` values may bootstrap a single account, but long-lived multi-account behavior belongs in Postgres, not hardcoded adapter state.
+Multi-account email support uses durable `email_accounts` rows for provider/account configuration and scheduler flags. Runtime `.env` values may bootstrap a single account, but long-lived multi-account behavior belongs in Postgres, not hardcoded adapter state.
 
 ## LLM Trait Packs
 

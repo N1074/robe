@@ -21,12 +21,14 @@ import (
 )
 
 type PostgresMemoryStore struct {
-	db                   *sql.DB
-	contactEncryptionKey []byte
+	db                            *sql.DB
+	contactEncryptionKey          []byte
+	previousContactEncryptionKeys [][]byte
 }
 
 type Options struct {
-	ContactEncryptionKey string
+	ContactEncryptionKey          string
+	PreviousContactEncryptionKeys []string
 }
 
 func NewPostgresMemoryStore(ctx context.Context, databaseURL string) (*PostgresMemoryStore, error) {
@@ -49,8 +51,9 @@ func NewPostgresMemoryStoreWithOptions(ctx context.Context, databaseURL string, 
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	store := &PostgresMemoryStore{
-		db:                   db,
-		contactEncryptionKey: deriveContactEncryptionKey(opts.ContactEncryptionKey),
+		db:                            db,
+		contactEncryptionKey:          deriveContactEncryptionKey(opts.ContactEncryptionKey),
+		previousContactEncryptionKeys: deriveContactEncryptionKeys(opts.PreviousContactEncryptionKeys),
 	}
 	if err := store.Migrate(ctx); err != nil {
 		db.Close()
@@ -483,6 +486,67 @@ ORDER BY slug
 	return projects, rows.Err()
 }
 
+func (s *PostgresMemoryStore) UpsertEmailAccount(ctx context.Context, account core.EmailAccount) (core.EmailAccount, error) {
+	account = core.NormalizeEmailAccount(account)
+	if account.Provider == "" {
+		return core.EmailAccount{}, errors.New("email account provider is required")
+	}
+	if account.AccountKey == ":" || account.AccountKey == "" {
+		return core.EmailAccount{}, errors.New("email account key is required")
+	}
+
+	now := time.Now()
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+INSERT INTO email_accounts (provider, account_key, display_name, user_id, credentials_file, token_file, status, autoreview_enabled, notify_telegram_enabled, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (account_key) DO UPDATE SET
+	provider = EXCLUDED.provider,
+	display_name = EXCLUDED.display_name,
+	user_id = EXCLUDED.user_id,
+	credentials_file = EXCLUDED.credentials_file,
+	token_file = EXCLUDED.token_file,
+	status = EXCLUDED.status,
+	autoreview_enabled = EXCLUDED.autoreview_enabled,
+	notify_telegram_enabled = EXCLUDED.notify_telegram_enabled,
+	updated_at = EXCLUDED.updated_at
+RETURNING id, created_at, updated_at
+`, account.Provider, account.AccountKey, account.DisplayName, account.UserID, account.CredentialsFile, account.TokenFile, account.Status, account.AutoReviewEnabled, account.NotifyTelegramEnabled, now, now).Scan(&id, &account.CreatedAt, &account.UpdatedAt)
+	if err != nil {
+		return core.EmailAccount{}, err
+	}
+	account.ID = fmt.Sprintf("%d", id)
+	return account, nil
+}
+
+func (s *PostgresMemoryStore) ListEmailAccounts(ctx context.Context, autoReviewOnly bool) ([]core.EmailAccount, error) {
+	query := `
+SELECT id::text, provider, account_key, display_name, user_id, credentials_file, token_file, status, autoreview_enabled, notify_telegram_enabled, created_at, updated_at
+FROM email_accounts
+WHERE status = 'active'
+`
+	if autoReviewOnly {
+		query += " AND autoreview_enabled = true"
+	}
+	query += " ORDER BY account_key"
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []core.EmailAccount
+	for rows.Next() {
+		var account core.EmailAccount
+		if err := rows.Scan(&account.ID, &account.Provider, &account.AccountKey, &account.DisplayName, &account.UserID, &account.CredentialsFile, &account.TokenFile, &account.Status, &account.AutoReviewEnabled, &account.NotifyTelegramEnabled, &account.CreatedAt, &account.UpdatedAt); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, core.NormalizeEmailAccount(account))
+	}
+	return accounts, rows.Err()
+}
+
 func (s *PostgresMemoryStore) GetProject(ctx context.Context, slug string) (core.Project, error) {
 	slug = strings.TrimSpace(slug)
 	var id int64
@@ -519,17 +583,25 @@ func (s *PostgresMemoryStore) UpsertEmailContact(ctx context.Context, identity c
 
 	now := time.Now()
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	storedFullName, err := s.encryptContactPrivateValue(identity.RawName)
+	if err != nil {
+		return core.Contact{}, err
+	}
+	err = s.db.QueryRowContext(ctx, `
 INSERT INTO contacts (alias, full_name, kind, relationship, project_slug, importance, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)
 RETURNING id
-`, identity.Alias, identity.RawName, core.ContactKindUnknown, core.ContactRelationshipUnknown, normalizeProjectSlugStorage(identity.ProjectSlug), defaultInt(0, 3), now, now).Scan(&id)
+`, identity.Alias, storedFullName, core.ContactKindUnknown, core.ContactRelationshipUnknown, normalizeProjectSlugStorage(identity.ProjectSlug), defaultInt(0, 3), now, now).Scan(&id)
 	if err != nil {
 		return core.Contact{}, err
 	}
 
 	if identity.RawEmail != "" {
-		storedEmail, err := s.encryptContactEmail(identity.RawEmail)
+		storedEmail, err := s.encryptContactPrivateValue(identity.RawEmail)
+		if err != nil {
+			return core.Contact{}, err
+		}
+		storedDisplayName, err := s.encryptContactPrivateValue(identity.RawName)
 		if err != nil {
 			return core.Contact{}, err
 		}
@@ -537,7 +609,7 @@ RETURNING id
 INSERT INTO contact_addresses (contact_id, address_hash, email, display_name_seen, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (address_hash) DO UPDATE SET contact_id = EXCLUDED.contact_id, display_name_seen = EXCLUDED.display_name_seen, updated_at = EXCLUDED.updated_at
-`, id, emailHash(identity.RawEmail), storedEmail, identity.RawName, now, now); err != nil {
+`, id, emailHash(identity.RawEmail), storedEmail, storedDisplayName, now, now); err != nil {
 			return core.Contact{}, err
 		}
 	}
@@ -608,7 +680,8 @@ LIMIT 1
 	if err != nil {
 		return core.Contact{}, err
 	}
-	contact.Email = s.decryptContactEmail(contact.Email)
+	contact.FullName = s.decryptContactPrivateValue(contact.FullName)
+	contact.Email = s.decryptContactPrivateValue(contact.Email)
 	contact.CreatedAt = createdAt
 	contact.UpdatedAt = updatedAt
 	return contact, nil
@@ -791,16 +864,34 @@ func deriveContactEncryptionKey(secret string) []byte {
 	return sum[:]
 }
 
-func (s *PostgresMemoryStore) encryptContactEmail(email string) (string, error) {
-	email = strings.TrimSpace(email)
-	if email == "" {
-		return "", nil
+func deriveContactEncryptionKeys(secrets []string) [][]byte {
+	keys := make([][]byte, 0, len(secrets))
+	for _, secret := range secrets {
+		if key := deriveContactEncryptionKey(secret); len(key) > 0 {
+			keys = append(keys, key)
+		}
 	}
-	if len(s.contactEncryptionKey) == 0 {
-		return "", nil
-	}
+	return keys
+}
 
-	block, err := aes.NewCipher(s.contactEncryptionKey)
+func (s *PostgresMemoryStore) encryptContactEmail(email string) (string, error) {
+	return s.encryptContactPrivateValue(email)
+}
+
+func (s *PostgresMemoryStore) decryptContactEmail(value string) string {
+	return s.decryptContactPrivateValue(value)
+}
+
+func (s *PostgresMemoryStore) encryptContactPrivateValue(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || len(s.contactEncryptionKey) == 0 {
+		return "", nil
+	}
+	return encryptContactPrivateValueWithKey(value, s.contactEncryptionKey)
+}
+
+func encryptContactPrivateValueWithKey(value string, key []byte) (string, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
@@ -813,37 +904,138 @@ func (s *PostgresMemoryStore) encryptContactEmail(email string) (string, error) 
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	ciphertext := gcm.Seal(nil, nonce, []byte(email), nil)
+	ciphertext := gcm.Seal(nil, nonce, []byte(value), nil)
 	payload := append(nonce, ciphertext...)
 	return "enc:v1:" + base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
-func (s *PostgresMemoryStore) decryptContactEmail(value string) string {
+func (s *PostgresMemoryStore) decryptContactPrivateValue(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || !strings.HasPrefix(value, "enc:v1:") || len(s.contactEncryptionKey) == 0 {
+	if value == "" {
 		return ""
 	}
+	if !strings.HasPrefix(value, "enc:v1:") {
+		return value
+	}
+	if plaintext, ok := decryptContactPrivateValueWithKey(value, s.contactEncryptionKey); ok {
+		return plaintext
+	}
+	for _, key := range s.previousContactEncryptionKeys {
+		if plaintext, ok := decryptContactPrivateValueWithKey(value, key); ok {
+			return plaintext
+		}
+	}
+	return ""
+}
 
+func decryptContactPrivateValueWithKey(value string, key []byte) (string, bool) {
+	if len(key) == 0 {
+		return "", false
+	}
 	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, "enc:v1:"))
 	if err != nil {
-		return ""
+		return "", false
 	}
-	block, err := aes.NewCipher(s.contactEncryptionKey)
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	if len(payload) < gcm.NonceSize() {
-		return ""
+		return "", false
 	}
 	nonce := payload[:gcm.NonceSize()]
 	ciphertext := payload[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return string(plaintext)
+	return string(plaintext), true
+}
+
+func (s *PostgresMemoryStore) RotateContactEncryption(ctx context.Context) error {
+	if len(s.contactEncryptionKey) == 0 {
+		return errors.New("contact encryption key is required")
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT id, full_name FROM contacts WHERE full_name <> ''`)
+	if err != nil {
+		return err
+	}
+	type contactValue struct {
+		id    int64
+		value string
+	}
+	var contacts []contactValue
+	for rows.Next() {
+		var item contactValue
+		if err := rows.Scan(&item.id, &item.value); err != nil {
+			rows.Close()
+			return err
+		}
+		contacts = append(contacts, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for _, item := range contacts {
+		plain := s.decryptContactPrivateValue(item.value)
+		if plain == "" {
+			continue
+		}
+		encrypted, err := s.encryptContactPrivateValue(plain)
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE contacts SET full_name = $2, updated_at = now() WHERE id = $1`, item.id, encrypted); err != nil {
+			return err
+		}
+	}
+
+	addressRows, err := s.db.QueryContext(ctx, `SELECT address_hash, email, display_name_seen FROM contact_addresses WHERE email <> '' OR display_name_seen <> ''`)
+	if err != nil {
+		return err
+	}
+	type addressValue struct {
+		hash        string
+		email       string
+		displayName string
+	}
+	var addresses []addressValue
+	for addressRows.Next() {
+		var item addressValue
+		if err := addressRows.Scan(&item.hash, &item.email, &item.displayName); err != nil {
+			addressRows.Close()
+			return err
+		}
+		addresses = append(addresses, item)
+	}
+	if err := addressRows.Err(); err != nil {
+		addressRows.Close()
+		return err
+	}
+	addressRows.Close()
+
+	for _, item := range addresses {
+		email := s.decryptContactPrivateValue(item.email)
+		displayName := s.decryptContactPrivateValue(item.displayName)
+		encryptedEmail, err := s.encryptContactPrivateValue(email)
+		if err != nil {
+			return err
+		}
+		encryptedDisplayName, err := s.encryptContactPrivateValue(displayName)
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE contact_addresses SET email = $2, display_name_seen = $3, updated_at = now() WHERE address_hash = $1`, item.hash, encryptedEmail, encryptedDisplayName); err != nil {
+			return err
+		}
+	}
+	return nil
 }

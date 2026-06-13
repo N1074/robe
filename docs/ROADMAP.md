@@ -90,10 +90,12 @@ Status: in progress.
 - Core-private raw sender identity with Robe-facing safe aliases
 - safe `/email show` with explicit raw escape hatch
 - Postgres contact directory for raw identity and validated relationship metadata
-- encrypted `contact_addresses.email` storage when `CONTACT_ENCRYPTION_KEY` is configured
-- Postgres `email_accounts` foundation for multi-account review scheduling
+- encrypted contact private fields when `CONTACT_ENCRYPTION_KEY` is configured
+- contact encryption rotation through previous-key fallback
+- Postgres `email_accounts` driven multi-account review scheduling
 - LLM-proposed contact profile updates validated by Core
 - email review dry-run with audit records
+- opt-in scheduler with dry-run default
 - email classification
 - summarization
 - task/memory proposals only
@@ -107,7 +109,7 @@ Exit criteria:
 - no email send/delete/archive/unsubscribe without explicit confirmation or later policy
 - controlled label mutation is reversible, Core-owned and audited
 - audit records for email-derived proposals
-- scheduler remains disabled until dry-run review has been inspected
+- scheduler remains opt-in and dry-run by default until review behavior has been inspected
 
 ## Phase 6: RAG And Documents
 

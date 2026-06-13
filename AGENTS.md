@@ -316,8 +316,9 @@ Policy:
 - `/email show` is safe by default; raw message display requires `/email show raw <message_id>`
 - contact relationship/category proposals from the LLM must be validated by Core before writing to `ContactDirectory`
 - email review automation must start in dry-run mode with audit records before any scheduler is enabled
-- `CONTACT_ENCRYPTION_KEY` enables encrypted storage for `contact_addresses.email`; without it, raw email addresses should not be persisted in that column
-- durable multi-account email configuration belongs in Postgres `email_accounts`, not hardcoded adapter state
+- `CONTACT_ENCRYPTION_KEY` enables encrypted storage for contact private fields; without it, new raw contact identity values should not be persisted in private columns
+- `CONTACT_ENCRYPTION_PREVIOUS_KEYS` allows startup rotation into the current contact encryption key
+- durable multi-account email configuration belongs in Postgres `email_accounts`; the scheduler reads those rows and remains opt-in/dry-run by default
 
 Confirmation flow should eventually look like:
 

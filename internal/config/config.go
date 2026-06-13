@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -29,16 +30,20 @@ type Config struct {
 	GmailCredentialsFile string
 	GmailTokenFile       string
 	GmailUserID          string
+	EmailReviewEnabled   bool
+	EmailReviewDryRun    bool
+	EmailReviewInterval  time.Duration
 
 	STTProvider       string
 	STTCommand        string
 	STTArgs           []string
 	STTTimeoutSeconds int
 
-	MemoryProvider       string
-	DatabaseURL          string
-	ProjectAliases       map[string]string
-	ContactEncryptionKey string
+	MemoryProvider                string
+	DatabaseURL                   string
+	ProjectAliases                map[string]string
+	ContactEncryptionKey          string
+	ContactPreviousEncryptionKeys []string
 
 	EmbeddingProvider string
 	EmbeddingBaseURL  string
@@ -71,16 +76,20 @@ func Load() Config {
 		GmailCredentialsFile: os.Getenv("GMAIL_CREDENTIALS_FILE"),
 		GmailTokenFile:       os.Getenv("GMAIL_TOKEN_FILE"),
 		GmailUserID:          getenv("GMAIL_USER_ID", "me"),
+		EmailReviewEnabled:   getenvBool("EMAIL_REVIEW_ENABLED", false),
+		EmailReviewDryRun:    getenvBool("EMAIL_REVIEW_DRY_RUN", true),
+		EmailReviewInterval:  time.Duration(getenvInt("EMAIL_REVIEW_INTERVAL_MINUTES", 15)) * time.Minute,
 
 		STTProvider:       getenv("STT_PROVIDER", ""),
 		STTCommand:        os.Getenv("STT_COMMAND"),
 		STTArgs:           splitArgs(os.Getenv("STT_ARGS")),
 		STTTimeoutSeconds: getenvInt("STT_TIMEOUT_SECONDS", 120),
 
-		MemoryProvider:       getenv("MEMORY_PROVIDER", ""),
-		DatabaseURL:          os.Getenv("DATABASE_URL"),
-		ProjectAliases:       parseProjectAliases(os.Getenv("MEMORY_PROJECT_ALIASES")),
-		ContactEncryptionKey: os.Getenv("CONTACT_ENCRYPTION_KEY"),
+		MemoryProvider:                getenv("MEMORY_PROVIDER", ""),
+		DatabaseURL:                   os.Getenv("DATABASE_URL"),
+		ProjectAliases:                parseProjectAliases(os.Getenv("MEMORY_PROJECT_ALIASES")),
+		ContactEncryptionKey:          os.Getenv("CONTACT_ENCRYPTION_KEY"),
+		ContactPreviousEncryptionKeys: splitCSV(os.Getenv("CONTACT_ENCRYPTION_PREVIOUS_KEYS")),
 
 		EmbeddingProvider: getenv("EMBEDDING_PROVIDER", ""),
 		EmbeddingBaseURL:  getenv("EMBEDDING_BASE_URL", getenv("LLM_BASE_URL", "http://localhost:11434")),
@@ -125,6 +134,21 @@ func getenvFloat(key string, fallback float64) float64 {
 	return parsed
 }
 
+func getenvBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func splitArgs(value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -132,6 +156,22 @@ func splitArgs(value string) []string {
 	}
 
 	return strings.Fields(value)
+}
+
+func splitCSV(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func parseProjectAliases(value string) map[string]string {

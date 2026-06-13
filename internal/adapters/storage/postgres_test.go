@@ -86,3 +86,31 @@ func TestEncryptContactEmailWithoutKeyStoresNoRawEmail(t *testing.T) {
 		t.Fatalf("expected no stored raw email without key, got %q", encrypted)
 	}
 }
+
+func TestDecryptContactPrivateValueWithPreviousKey(t *testing.T) {
+	oldStore := &PostgresMemoryStore{contactEncryptionKey: deriveContactEncryptionKey("old-secret")}
+	encrypted, err := oldStore.encryptContactPrivateValue("Maria Sanchez")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	newStore := &PostgresMemoryStore{
+		contactEncryptionKey:          deriveContactEncryptionKey("new-secret"),
+		previousContactEncryptionKeys: deriveContactEncryptionKeys([]string{"old-secret"}),
+	}
+	if got := newStore.decryptContactPrivateValue(encrypted); got != "Maria Sanchez" {
+		t.Fatalf("expected decrypted value with previous key, got %q", got)
+	}
+}
+
+func TestEncryptContactPrivateValueWithoutKeyStoresNoRawValue(t *testing.T) {
+	store := &PostgresMemoryStore{}
+
+	encrypted, err := store.encryptContactPrivateValue("Maria Sanchez")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if encrypted != "" {
+		t.Fatalf("expected no stored raw private value without key, got %q", encrypted)
+	}
+}

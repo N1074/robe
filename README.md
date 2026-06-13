@@ -351,7 +351,11 @@ If Robe replies that Calendar is not configured yet, calendar OAuth/config is no
 
 If Robe replies that Email is not configured yet, Gmail OAuth/config is not active. Set `EMAIL_PROVIDER=gmail`, Gmail credentials/token paths and restart Robe.
 
-Set `CONTACT_ENCRYPTION_KEY` before enabling the Postgres contact directory in a real mailbox. Robe stores a deterministic address hash for lookup and stores `contact_addresses.email` encrypted with AES-GCM when this key is present. Without the key, raw email addresses are not persisted in that column.
+Set `CONTACT_ENCRYPTION_KEY` before enabling the Postgres contact directory in a real mailbox. Robe stores a deterministic address hash for lookup and stores contact private fields such as `contacts.full_name`, `contact_addresses.email` and `contact_addresses.display_name_seen` encrypted with AES-GCM when this key is present. Without the key, new raw contact identity values are not persisted in those private columns.
+
+For key rotation, set a new `CONTACT_ENCRYPTION_KEY` and put the old key in `CONTACT_ENCRYPTION_PREVIOUS_KEYS`. On startup, Robe can decrypt values with previous keys and re-encrypt them with the current key.
+
+Email review scheduling is disabled by default. To run the multi-account review loop, set `EMAIL_REVIEW_ENABLED=true`; it bootstraps the Gmail account from `.env` into `email_accounts`, reads active accounts with `autoreview_enabled=true`, and keeps `EMAIL_REVIEW_DRY_RUN=true` by default.
 
 ## Quality checks
 
@@ -453,9 +457,11 @@ Current Email policy:
 - natural-language email search/show routes through the same read-only Core interface
 - sender identity is shown as a safe alias; full sender names and email addresses are Core-private
 - `ContactDirectory` persists raw contact identity locally in Postgres while exposing only safe aliases to Robe/LLM contexts
-- Postgres includes `email_accounts` as the durable foundation for future multi-account scheduler configuration
+- contact private fields are encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured; previous keys can be supplied for rotation
+- Postgres includes `email_accounts` as the durable foundation for multi-account scheduler configuration
 - LLM-proposed contact relationship/category updates are validated by Core before persistence
-- `EmailReviewService` can run unread/unreviewed review in dry-run mode and audit proposed labels before any scheduler is enabled
+- `EmailReviewService` can run unread/unreviewed review in dry-run mode and audit proposed labels before label execution
+- the email scheduler is opt-in, reads `email_accounts`, and defaults to dry-run review
 - Gmail messages include a web link so Telegram can open the message in an already-authenticated browser or mobile Gmail session
 - no email sending, deletion, archiving or unsubscribe execution is implemented
 - label mutation is limited to controlled `Robe/...` labels for the future review workflow and must remain Core-owned
