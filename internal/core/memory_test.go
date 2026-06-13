@@ -42,6 +42,36 @@ func TestHandleTextAskWithMemory(t *testing.T) {
 	}
 }
 
+func TestHandleTextAskWithMemoryRedactsPromptContext(t *testing.T) {
+	var lastPrompt string
+	llm := mockLLM{answer: "Done.", lastPrompt: &lastPrompt}
+	memory := &mockMemoryStore{
+		memories: []Memory{
+			{
+				ID:         "1",
+				Kind:       MemoryKindContactContext,
+				Text:       "Contact user@example.com with token=secret123 and phone +34 612 345 678.",
+				Status:     "active",
+				Importance: 4,
+			},
+		},
+	}
+	assistant := NewAssistant(llm, Status{}, WithMemory(memory), WithEmbedder(mockEmbedder{embedding: []float64{1, 0}, model: "test"}))
+
+	if _, err := assistant.HandleText(context.Background(), "/askmem contact | who should I contact?"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	for _, leaked := range []string{"user@example.com", "secret123", "+34 612 345 678"} {
+		if strings.Contains(lastPrompt, leaked) {
+			t.Fatalf("prompt leaked %q: %q", leaked, lastPrompt)
+		}
+	}
+	if !strings.Contains(lastPrompt, "[REDACTED_EMAIL]") || !strings.Contains(lastPrompt, "[REDACTED_SECRET]") || !strings.Contains(lastPrompt, "[REDACTED_PHONE]") {
+		t.Fatalf("prompt did not contain redaction markers: %q", lastPrompt)
+	}
+}
+
 func TestHandleTextAskWithMemoryRequiresSeparator(t *testing.T) {
 	assistant := NewAssistant(mockLLM{}, Status{}, WithMemory(&mockMemoryStore{}))
 

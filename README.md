@@ -44,6 +44,7 @@ Implemented:
 - optional Ollama embeddings for memory-assisted LLM retrieval
 - central permission engine for Core actions
 - PostgreSQL audit trail for memory writes and calendar write proposals/execution
+- deterministic Core redaction for memory context before LLM prompt injection
 - `.env` based configuration
 - basic project quality commands through `make`
 - config, core command and LLM response cleanup tests
@@ -52,7 +53,7 @@ Planned:
 
 - Gmail read-only search and summarization
 - web search adapter
-- PII redaction layer
+- broader PII redaction for future email, web and RAG inputs
 - task system
 - coaching system
 - TTS
@@ -365,6 +366,7 @@ The intended policy is:
 - email deletion, email sending, calendar modification and external posting require confirmation gates
 - Core classifies side effects through a permission engine
 - memory writes and calendar write proposals/executions are written to the audit log when Postgres is configured
+- memory context injected into LLM prompts is deterministically redacted for common PII and secrets
 - all future tool executions should use the same permission and audit model
 - external content should pass through PII redaction before memory creation, prompt injection, RAG indexing or task generation when practical
 - private project aliases, personal labels and secrets belong in `.env`, server config, secrets or database records, not in committed code

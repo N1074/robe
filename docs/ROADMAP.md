@@ -67,7 +67,8 @@ Status: in progress.
 - audit persistence in PostgreSQL
 - audit events for memory writes
 - audit events for calendar write proposals, confirmations and cancellations
-- PII redaction layer
+- initial deterministic PII redaction before memory prompt injection
+- broader PII redaction for future external content
 - policy tests for sensitive content
 
 Exit criteria:

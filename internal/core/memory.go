@@ -386,7 +386,7 @@ func buildMemoryPrompt(question string, memories []Memory) string {
 	b.WriteString("Answer the user using only relevant memory when helpful. Do not claim memory contains something it does not contain.\n\nRelevant memory:\n")
 	for _, memory := range memories {
 		b.WriteString("- ")
-		b.WriteString(formatMemory(memory))
+		b.WriteString(formatMemoryForPrompt(memory))
 		b.WriteString("\n")
 	}
 	b.WriteString("\nUser question:\n")
@@ -399,7 +399,7 @@ func formatMemoryForPrompt(memory Memory) string {
 	if project == "" {
 		project = "global"
 	}
-	return "[" + project + "/" + normalizeMemoryKind(memory.Kind) + "/" + importanceLabel(memory.Importance) + "] " + strings.TrimSpace(memory.Text)
+	return "[" + project + "/" + normalizeMemoryKind(memory.Kind) + "/" + importanceLabel(memory.Importance) + "] " + redactForPrompt(memory.Text)
 }
 
 func memoryIDList(memories []Memory) string {
