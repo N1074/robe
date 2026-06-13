@@ -121,9 +121,9 @@ func TestSplitArgs(t *testing.T) {
 }
 
 func TestParseProjectAliases(t *testing.T) {
-	got := parseProjectAliases("garden=veg,orchard;writing=novel")
+	got := parseProjectAliases("demo=veg,orchard;writing=novel")
 
-	if got["garden"] != "garden" || got["orchard"] != "garden" || got["veg"] != "garden" || got["novel"] != "writing" {
+	if got["demo"] != "demo" || got["orchard"] != "demo" || got["veg"] != "demo" || got["novel"] != "writing" {
 		t.Fatalf("unexpected aliases: %#v", got)
 	}
 }

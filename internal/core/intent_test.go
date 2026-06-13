@@ -154,14 +154,14 @@ func TestHandleTextPassesConfiguredProjectHintsToIntentParser(t *testing.T) {
 		mockLLM{answer: "answer"},
 		Status{},
 		WithIntentParser(intentParser),
-		WithProjectAliases(map[string]string{"garden": "garden", "veg": "garden"}),
+		WithProjectAliases(map[string]string{"demo": "demo", "veg": "demo"}),
 	)
 
 	if _, err := assistant.HandleText(context.Background(), "hello"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if len(intentParser.lastRequest.ProjectHints) != 1 || intentParser.lastRequest.ProjectHints[0] != "garden" {
+	if len(intentParser.lastRequest.ProjectHints) != 1 || intentParser.lastRequest.ProjectHints[0] != "demo" {
 		t.Fatalf("unexpected project hints: %#v", intentParser.lastRequest.ProjectHints)
 	}
 }
@@ -172,10 +172,10 @@ func TestHandleTextExplicitMemoryRequestCreatesMemory(t *testing.T) {
 		intent: Intent{
 			Kind: IntentMemoryCreate,
 			MemoryDraft: Memory{
-				Project:    ProjectRef{Slug: "garden"},
+				Project:    ProjectRef{Slug: "demo"},
 				Kind:       MemoryKindPreference,
-				Text:       "User prefers kilos, not boxes, for garden orders.",
-				Tags:       []string{"garden", "orders"},
+				Text:       "User prefers kilos, not boxes, for demo orders.",
+				Tags:       []string{"demo", "orders"},
 				Importance: 4,
 				Confidence: 0.9,
 			},
@@ -183,7 +183,7 @@ func TestHandleTextExplicitMemoryRequestCreatesMemory(t *testing.T) {
 	}
 	assistant := NewAssistant(nil, Status{}, WithMemory(memory), WithIntentParser(intentParser))
 
-	got, err := assistant.HandleText(context.Background(), "recuerda que para el garden quiero hablar en kilos, no en cajas")
+	got, err := assistant.HandleText(context.Background(), "recuerda que para el demo quiero hablar en kilos, no en cajas")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestHandleTextExplicitMemoryRequestCreatesMemory(t *testing.T) {
 	if !strings.Contains(got, "Memory saved:") || len(memory.memories) != 1 {
 		t.Fatalf("unexpected memory response: %q memories=%d", got, len(memory.memories))
 	}
-	if memory.memories[0].Project.Slug != "garden" || memory.memories[0].Kind != MemoryKindPreference || memory.memories[0].Source != "telegram/llm" {
+	if memory.memories[0].Project.Slug != "demo" || memory.memories[0].Kind != MemoryKindPreference || memory.memories[0].Source != "telegram/llm" {
 		t.Fatalf("unexpected stored memory: %#v", memory.memories[0])
 	}
 }

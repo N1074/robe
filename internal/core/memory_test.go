@@ -305,12 +305,12 @@ func TestHandleTextProjectCreateUseAndRemember(t *testing.T) {
 
 func TestProjectForTextUsesOnlyConfiguredAliases(t *testing.T) {
 	assistant := NewAssistant(nil, Status{})
-	if got := assistant.projectForText("question about garden"); got != "" {
+	if got := assistant.projectForText("question about demo"); got != "" {
 		t.Fatalf("expected no project without aliases, got %q", got)
 	}
 
-	assistant = NewAssistant(nil, Status{}, WithProjectAliases(map[string]string{"garden": "garden"}))
-	if got := assistant.projectForText("question about garden"); got != "garden" {
+	assistant = NewAssistant(nil, Status{}, WithProjectAliases(map[string]string{"demo": "demo"}))
+	if got := assistant.projectForText("question about demo"); got != "demo" {
 		t.Fatalf("expected configured project, got %q", got)
 	}
 }
@@ -320,13 +320,13 @@ func TestHandleTextProjectMemoryIsRetrievedOnlyWhenRelevant(t *testing.T) {
 	llm := mockLLM{answer: "Use kilos.", lastPrompt: &lastPrompt}
 	memory := &mockMemoryStore{
 		memories: []Memory{
-			{ID: "1", Project: ProjectRef{Slug: "garden"}, Kind: MemoryKindConstraint, Text: "User prefers kilos, not boxes, for garden orders.", Status: "active", Importance: 4},
+			{ID: "1", Project: ProjectRef{Slug: "demo"}, Kind: MemoryKindConstraint, Text: "User prefers kilos, not boxes, for demo orders.", Status: "active", Importance: 4},
 			{ID: "2", Project: ProjectRef{Slug: "writing"}, Kind: MemoryKindFact, Text: "Writing project uses a dark fantasy tone.", Status: "active", Importance: 4},
 		},
 	}
-	assistant := NewAssistant(llm, Status{}, WithMemory(memory), WithEmbedder(mockEmbedder{embedding: []float64{1, 0}, model: "test"}), WithProjectAliases(map[string]string{"garden": "garden"}))
+	assistant := NewAssistant(llm, Status{}, WithMemory(memory), WithEmbedder(mockEmbedder{embedding: []float64{1, 0}, model: "test"}), WithProjectAliases(map[string]string{"demo": "demo"}))
 
-	if _, err := assistant.HandleText(context.Background(), "/ask que unidad usamos para garden"); err != nil {
+	if _, err := assistant.HandleText(context.Background(), "/ask que unidad usamos para demo"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 

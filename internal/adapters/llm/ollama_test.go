@@ -65,12 +65,12 @@ func TestDecodeIntentCalendarDelete(t *testing.T) {
 }
 
 func TestDecodeIntentMemoryCreate(t *testing.T) {
-	got, err := decodeIntent(`{"action":"create_memory","text":"User prefers kilos, not boxes, for garden orders.","project":"garden","kind":"preference","tags":["garden","orders"],"importance":4,"confidence":0.9}`)
+	got, err := decodeIntent(`{"action":"create_memory","text":"User prefers kilos, not boxes, for demo orders.","project":"demo","kind":"preference","tags":["demo","orders"],"importance":4,"confidence":0.9}`)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if got.Kind != "create_memory" || got.MemoryDraft.Project.Slug != "garden" || got.MemoryDraft.Kind != "preference" {
+	if got.Kind != "create_memory" || got.MemoryDraft.Project.Slug != "demo" || got.MemoryDraft.Kind != "preference" {
 		t.Fatalf("unexpected intent: %#v", got)
 	}
 	if len(got.MemoryDraft.Tags) != 2 || got.MemoryDraft.Importance != 4 || got.MemoryDraft.Confidence != 0.9 {
