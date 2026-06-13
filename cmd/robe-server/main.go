@@ -43,7 +43,7 @@ func main() {
 		Handler: mux,
 	}
 
-	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature)
+	llmClient := llm.NewOllamaClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMNumPredict, cfg.LLMTemperature, cfg.PromptsDir)
 	var calendarClient core.Calendar
 	if cfg.CalendarProvider == "google" {
 		client, err := calendaradapter.NewGoogleCalendar(ctx, calendaradapter.GoogleConfig{

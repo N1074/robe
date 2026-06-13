@@ -130,6 +130,7 @@ Example:
     LLM_MODEL=qwen3:14b
     LLM_NUM_PREDICT=1024
     LLM_TEMPERATURE=0.2
+    PROMPTS_DIR=
 
     CALENDAR_PROVIDER=google
     CALENDAR_ID=primary
@@ -151,6 +152,8 @@ Example:
     EMBEDDING_MODEL=nomic-embed-text
 
 `.env` must not be committed.
+
+`PROMPTS_DIR` is optional. When set, Robe loads `system_chat.txt` and `system_intent.txt` from that directory; otherwise it uses the embedded defaults in `internal/adapters/llm/prompts`.
 
 ## Local database
 

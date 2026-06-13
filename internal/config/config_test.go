@@ -150,3 +150,13 @@ func TestLoadMemoryDefaults(t *testing.T) {
 		t.Fatalf("expected default embedding base url, got %q", cfg.EmbeddingBaseURL)
 	}
 }
+
+func TestLoadPromptsDir(t *testing.T) {
+	t.Setenv("PROMPTS_DIR", "/opt/ai/projects/robe/prompts")
+
+	cfg := Load()
+
+	if cfg.PromptsDir != "/opt/ai/projects/robe/prompts" {
+		t.Fatalf("expected prompts dir, got %q", cfg.PromptsDir)
+	}
+}

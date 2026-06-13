@@ -3,30 +3,38 @@ package llm
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/N1074/robe/internal/core"
 )
 
+//go:embed prompts/*
+var defaultPrompts embed.FS
+
 type OllamaClient struct {
 	baseURL     string
 	model       string
 	numPredict  int
 	temperature float64
+	promptsDir  string
 	httpClient  *http.Client
 }
 
-func NewOllamaClient(baseURL string, model string, numPredict int, temperature float64) *OllamaClient {
+func NewOllamaClient(baseURL string, model string, numPredict int, temperature float64, promptsDir string) *OllamaClient {
 	return &OllamaClient{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       model,
 		numPredict:  numPredict,
 		temperature: temperature,
+		promptsDir:  strings.TrimSpace(promptsDir),
 		httpClient: &http.Client{
 			Timeout: 180 * time.Second,
 		},
@@ -150,7 +158,7 @@ func (c *OllamaClient) Ask(ctx context.Context, prompt string) (string, error) {
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: "Eres Robe, un asistente personal local. Responde de forma directa, útil y concisa. No muestres razonamiento interno.",
+				Content: c.readPrompt("system_chat.txt", "Eres Robe, un asistente personal local. Responde de forma directa, útil y concisa. No muestres razonamiento interno."),
 			},
 			{
 				Role:    "user",
@@ -209,7 +217,7 @@ func (c *OllamaClient) ParseIntent(ctx context.Context, req core.IntentRequest) 
 		Messages: []chatMessage{
 			{
 				Role:    "system",
-				Content: intentSystemPrompt(),
+				Content: c.intentSystemPrompt(),
 			},
 			{
 				Role: "user",
@@ -257,8 +265,8 @@ func (c *OllamaClient) ParseIntent(ctx context.Context, req core.IntentRequest) 
 	return decodeIntent(stripThinking(out.Message.Content))
 }
 
-func intentSystemPrompt() string {
-	return `You are Robe's intent parser. Return only compact JSON. No markdown.
+func (c *OllamaClient) intentSystemPrompt() string {
+	return c.readPrompt("system_intent.txt", `You are Robe's intent parser. Return only compact JSON. No markdown.
 
 Supported actions:
 - calendar_list: user asks to see calendar events. Use period "today", "tomorrow", or "week".
@@ -282,7 +290,22 @@ Rules:
 {"action":"create_memory","text":"User prefers concise technical answers.","project":"global","kind":"preference","tags":["communication"],"importance":4,"confidence":0.9}
 {"action":"calendar_list","period":"today"}
 {"action":"ask","prompt":"..."}
-{"action":"none"}`
+{"action":"none"}`)
+}
+
+func (c *OllamaClient) readPrompt(filename string, defaultVal string) string {
+	if c.promptsDir != "" {
+		path := filepath.Join(c.promptsDir, filename)
+		if data, err := os.ReadFile(path); err == nil {
+			return string(data)
+		}
+	}
+
+	if data, err := defaultPrompts.ReadFile("prompts/" + filename); err == nil {
+		return string(data)
+	}
+
+	return defaultVal
 }
 
 func formatIntentUserText(req core.IntentRequest) string {

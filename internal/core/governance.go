@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -136,7 +137,10 @@ func (a *Assistant) recordAudit(ctx context.Context, action Action, decision Per
 			event.Result = AuditResultFailed
 		}
 	}
-	_ = a.audit.RecordAuditEvent(ctx, event)
+	if auditErr := a.audit.RecordAuditEvent(ctx, event); auditErr != nil {
+		slog.Warn("audit event recording failed", slog.Any("error", auditErr))
+	}
+
 }
 
 func memoryAction(actionType string, memory Memory) Action {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +123,39 @@ func TestOllamaEmbedderFallsBackToLegacyEndpoint(t *testing.T) {
 
 	if !legacyCalled || len(got) != 2 || got[1] != 0.5 {
 		t.Fatalf("unexpected fallback result: called=%v embedding=%#v", legacyCalled, got)
+	}
+}
+
+func TestOllamaClientReadPromptDefault(t *testing.T) {
+	client := NewOllamaClient("http://localhost:11434", "model", 1024, 0.2, "")
+	chatPrompt := client.readPrompt("system_chat.txt", "fallback")
+	if chatPrompt == "fallback" || !strings.Contains(chatPrompt, "Robe") {
+		t.Fatalf("expected embedded chat prompt, got %q", chatPrompt)
+	}
+
+	intentPrompt := client.readPrompt("system_intent.txt", "fallback")
+	if intentPrompt == "fallback" || !strings.Contains(intentPrompt, "intent parser") {
+		t.Fatalf("expected embedded intent prompt, got %q", intentPrompt)
+	}
+}
+
+func TestOllamaClientReadPromptCustom(t *testing.T) {
+	tempDir := t.TempDir()
+
+	customChat := "Custom chat instructions."
+	err := os.WriteFile(filepath.Join(tempDir, "system_chat.txt"), []byte(customChat), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewOllamaClient("http://localhost:11434", "model", 1024, 0.2, tempDir)
+	chatPrompt := client.readPrompt("system_chat.txt", "fallback")
+	if chatPrompt != customChat {
+		t.Fatalf("expected custom chat prompt, got %q", chatPrompt)
+	}
+
+	intentPrompt := client.readPrompt("system_intent.txt", "fallback")
+	if intentPrompt == "fallback" || !strings.Contains(intentPrompt, "intent parser") {
+		t.Fatalf("expected fallback to embedded intent prompt, got %q", intentPrompt)
 	}
 }

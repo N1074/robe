@@ -11,3 +11,5 @@ secrets/
 bin/
 dist/
 tmp/
+
+.vscode/settings.json

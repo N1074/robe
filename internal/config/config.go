@@ -37,6 +37,7 @@ type Config struct {
 	EmbeddingProvider string
 	EmbeddingBaseURL  string
 	EmbeddingModel    string
+	PromptsDir        string
 }
 
 func Load() Config {
@@ -72,6 +73,7 @@ func Load() Config {
 		EmbeddingProvider: getenv("EMBEDDING_PROVIDER", ""),
 		EmbeddingBaseURL:  getenv("EMBEDDING_BASE_URL", getenv("LLM_BASE_URL", "http://localhost:11434")),
 		EmbeddingModel:    getenv("EMBEDDING_MODEL", "nomic-embed-text"),
+		PromptsDir:        os.Getenv("PROMPTS_DIR"),
 	}
 }
 
