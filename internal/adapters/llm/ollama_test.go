@@ -78,6 +78,39 @@ func TestDecodeIntentMemoryCreate(t *testing.T) {
 	}
 }
 
+func TestDecodeIntentEmailSearch(t *testing.T) {
+	got, err := decodeIntent(`{"action":"email_search","query":"from:alice@example.com invoice"}`)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got.Kind != "email_search" || got.EmailQuery != "from:alice@example.com invoice" {
+		t.Fatalf("unexpected intent: %#v", got)
+	}
+}
+
+func TestDecodeIntentEmailShow(t *testing.T) {
+	got, err := decodeIntent(`{"action":"email_show","message_id":"msg_123"}`)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got.Kind != "email_show" || got.EmailMessageID != "msg_123" {
+		t.Fatalf("unexpected intent: %#v", got)
+	}
+}
+
+func TestDecodeEmailClassification(t *testing.T) {
+	got, err := decodeEmailClassification(`{"labels":["Robe/Reviewed","Robe/Category/Admin"],"important":true,"summary":"Admin notice.","contact":{"alias":"Agencia T.","kind":"organization","relationship":"admin","importance":4,"confidence":0.8,"reason":"official notice"}}`)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(got.Labels) != 2 || got.Labels[1] != "Robe/Category/Admin" || !got.Important || got.Summary != "Admin notice." {
+		t.Fatalf("unexpected classification: %#v", got)
+	}
+	if got.ContactProposal.Relationship != "admin" || got.ContactProposal.Confidence != 0.8 {
+		t.Fatalf("unexpected contact proposal: %#v", got.ContactProposal)
+	}
+}
+
 func TestOllamaEmbedderUsesEmbedEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/embed" {

@@ -91,6 +91,8 @@ Current MVP policy:
 - memory creation: `low` risk, allowed only after explicit memory intent validation
 - memory archive/tag: `medium` risk, allowed as local reversible curation
 - calendar create/delete: `high` risk, requires confirmation
+- email label application: `medium` risk, allowed only for controlled `Robe/...` review labels and audited
+- contact profile metadata: `medium` risk, allowed only after Core validation
 - unknown action types: denied
 
 New side-effecting features must add action types, permission tests and audit tests before being treated as stable.
@@ -143,6 +145,18 @@ The redaction layer should be deterministic and Core-owned. The LLM may help cla
 
 Current implementation starts with deterministic redaction of memory context before it is injected into LLM prompts. This protects common emails, phone numbers, card numbers, bank account numbers, signed URLs, unsubscribe links, OAuth codes, authorization headers, credential-bearing URLs, private keys, provider tokens and common government IDs while preserving the original stored memory for user review and curation.
 
+Core exposes `RedactExternalContentForPrompt` as the contract for future external content before LLM use. Email, web search, documents and task extraction should call this Core redaction path before prompt injection or indexing. Redaction is deterministic best effort, not a full DLP system.
+
+## Email Identity Privacy
+
+Email adapters may receive raw identities such as full display names and email addresses. Core owns translation from raw identity to Robe-facing identity. Outside Core-private lookup and future contact storage, email senders should be represented by a safe alias such as `Maria S. B.` plus a broad kind such as `person_or_org`, `organization`, `service` or `unknown_sender`.
+
+The LLM may categorize relationships or propose contact metadata from sanitized aliases and redacted content. Core validates supported kind, relationship, project and confidence before persistence. It must not receive raw sender email addresses or full surnames unless a later explicit user-approved workflow requires it.
+
+`ContactDirectory` is the Core-owned boundary for contact identity. PostgreSQL may store raw display names and email addresses locally for lookup, but normal Robe responses, prompt context and notifications use aliases.
+
+`contact_addresses.email` must be encrypted at rest when `CONTACT_ENCRYPTION_KEY` is configured. The deterministic `address_hash` supports local lookup without exposing the address. If the encryption key is missing, Core storage should avoid persisting plaintext email addresses.
+
 ## Memory Governance
 
 Memory exists for the agent. It is not primarily a note-taking system.
@@ -178,6 +192,14 @@ Planned domains:
 - web search
 
 Each domain should expose Core interfaces first, then adapters.
+
+The Gmail adapter may search, fetch messages and apply controlled `Robe/...` labels for Core-owned review workflows. It must not expose send, delete, archive or unsubscribe execution in early versions. Label mutation is reversible mailbox curation and must be validated and audited by Core before automatic use.
+
+The initial email review taxonomy is intentionally small: reviewed, important, needs-attention, admin, people, online-purchases, finance, projects, notifications and other. Project-specific or user-specific labels should come from database-backed rules, not free-form LLM output.
+
+Email review automation must start in dry-run mode. Dry-run review searches unread messages without `Robe/Reviewed`, proposes controlled labels and records audit events without mutating Gmail. Timed review should not be enabled until dry-run behavior is inspected.
+
+Multi-account email support should use durable `email_accounts` rows for provider/account configuration and scheduler flags. Runtime `.env` values may bootstrap a single account, but long-lived multi-account behavior belongs in Postgres, not hardcoded adapter state.
 
 ## LLM Trait Packs
 

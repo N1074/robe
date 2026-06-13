@@ -38,6 +38,7 @@ Implemented:
 - `/ping`, `/start`, `/help`, `/status`
 - `/ask <question>` using a local Ollama model
 - Google Calendar read/create/delete behind confirmation gates
+- Gmail search/show commands and controlled label support
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
 - structured local memory backed by Postgres
@@ -51,7 +52,7 @@ Implemented:
 
 Planned:
 
-- Gmail read-only search and summarization
+- Gmail summarization
 - web search adapter
 - broader PII redaction for future email, web and RAG inputs
 - task system
@@ -92,7 +93,7 @@ Tool adapters:
 - local LLM via Ollama
 - local embeddings via Ollama
 - Google Calendar
-- Gmail read-only
+- Gmail search/show and controlled labels
 - web search
 - Postgres memory store
 
@@ -138,6 +139,11 @@ Example:
     CALENDAR_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-calendar-credentials.json
     CALENDAR_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-calendar-token.json
     CALENDAR_TIMEZONE=Europe/Madrid
+
+    EMAIL_PROVIDER=gmail
+    GMAIL_CREDENTIALS_FILE=/opt/ai/projects/robe/secrets/google-gmail-credentials.json
+    GMAIL_TOKEN_FILE=/opt/ai/projects/robe/secrets/google-gmail-token.json
+    GMAIL_USER_ID=me
 
     STT_PROVIDER=command
     STT_COMMAND=/opt/ai/bin/transcribe-audio
@@ -216,6 +222,37 @@ On Windows PowerShell:
 
 Open the printed URL, approve Calendar access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path.
 
+## Gmail setup
+
+Gmail integration supports search, message display and controlled Robe labels for future automated review. It does not send, delete, archive or unsubscribe.
+
+Generate the Gmail token after configuring `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE`:
+
+    GOOGLE_AUTH_TARGET=gmail make google-auth
+
+On Windows PowerShell:
+
+    $env:GOOGLE_AUTH_TARGET="gmail"; powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 google-auth
+
+Open the printed URL, approve Gmail modify access, paste the authorization code, then keep the generated token file under `secrets/` or another non-committed path. Existing tokens created for read-only Gmail access must be regenerated because Robe now needs label permissions.
+
+Current controlled labels are:
+
+- `Robe/Reviewed`
+- `Robe/Important`
+- `Robe/NeedsAttention`
+- `Robe/Category/Admin`
+- `Robe/Category/People`
+- `Robe/Category/OnlinePurchases`
+- `Robe/Category/Finance`
+- `Robe/Category/Projects`
+- `Robe/Category/Notifications`
+- `Robe/Category/Other`
+
+These labels are intentionally broad. Project-specific or user-specific labels should come later from database-backed rules, not from free-form LLM output.
+
+Email sender identity is split between Core-private and Robe-facing forms. Core may retain the raw display name and email address for lookup and future contact rules, but prompts, summaries and ordinary Robe responses should use a safe alias. For example, `Maria Sanchez Barroso <maria@example.com>` becomes `Maria S. B.` outside Core. If Gmail provides only an email address, Robe uses `Unknown sender` instead of exposing the local part or domain.
+
 ## Telegram setup
 
 Create a bot with `@BotFather`, add the token to `.env`, then start Robe and send a message to the bot.
@@ -273,6 +310,10 @@ Telegram commands:
 - `/calendar week`
 - `/calendar create <title> | <start> | <end> [| location] [| description]`
 - `/calendar delete <event_id>`
+- `/email search <query>`
+- `/email show <message_id>`
+- `/email show raw <message_id>`
+- `/email review dry-run`
 - `/pending`
 - `/confirm <token>`
 - `/cancel <token>`
@@ -283,6 +324,13 @@ Natural language also works for supported calendar intents. For example:
     que tengo mañana en el calendario
 
 Calendar create/delete requests made in natural language still return a proposal and require `/confirm <token>`.
+
+Natural language also works for email search when Gmail is configured. For example:
+
+    busca correos de alice sobre facturas
+    ensename el correo msg_123
+
+Email natural-language actions are read-only for now. Robe may search or show a specific message ID, but it does not send, delete, archive, label or unsubscribe from natural language.
 
 Natural memory requests also work through the normal assistant flow. For example:
 
@@ -300,6 +348,10 @@ For `whisper.cpp`, make the wrapper print only the transcript on stdout. Keep lo
     /opt/ai/src/whisper.cpp/build/bin/whisper-cli -m /opt/ai/models/ggml-small.bin -f "$TMP_WAV" -l es -np -nt
 
 If Robe replies that Calendar is not configured yet, calendar OAuth/config is not active. Set `CALENDAR_PROVIDER=google`, credentials/token paths and restart Robe.
+
+If Robe replies that Email is not configured yet, Gmail OAuth/config is not active. Set `EMAIL_PROVIDER=gmail`, Gmail credentials/token paths and restart Robe.
+
+Set `CONTACT_ENCRYPTION_KEY` before enabling the Postgres contact directory in a real mailbox. Robe stores a deterministic address hash for lookup and stores `contact_addresses.email` encrypted with AES-GCM when this key is present. Without the key, raw email addresses are not persisted in that column.
 
 ## Quality checks
 
@@ -351,6 +403,7 @@ Expected smoke tests:
 - `/calendar delete <event_id>` returns a proposal and token, not a deleted event
 - `crea una cita mañana a las 12 con el dentista` returns a proposal and token, not a created event
 - `/confirm <token>` executes the proposed create/delete
+- `/email review dry-run` lists proposed labels/contact metadata without mutating Gmail
 - `/ask responde solo OK` returns a final answer without thinking text
 - an unauthorized Telegram account is ignored if `TELEGRAM_ALLOWED_USER_ID` is set
 
@@ -364,9 +417,11 @@ The intended policy is:
 - write operations require explicit confirmation
 - destructive actions are disabled until specifically implemented
 - email deletion, email sending, calendar modification and external posting require confirmation gates
+- current email commands are read-only; label mutation is reserved for the Core-owned review workflow
 - Core classifies side effects through a permission engine
 - memory writes and calendar write proposals/executions are written to the audit log when Postgres is configured
 - memory context injected into LLM prompts is deterministically redacted for common PII and secrets
+- Core exposes `RedactExternalContentForPrompt` as the redaction contract for future email, web and RAG content before LLM prompt injection
 - all future tool executions should use the same permission and audit model
 - external content should pass through PII redaction before memory creation, prompt injection, RAG indexing or task generation when practical
 - private project aliases, personal labels and secrets belong in `.env`, server config, secrets or database records, not in committed code
@@ -388,6 +443,23 @@ Current Calendar policy:
 - natural-language calendar create/delete also require `/confirm <token>`
 - voice calendar create/delete also require `/confirm <token>`
 - ambiguous confirmations such as "yes" are ignored
+
+Current Email policy:
+
+- Gmail access uses the modify OAuth scope so Robe can apply controlled review labels
+- `/email search <query>` lists matching message IDs and snippets
+- `/email show <message_id>` displays a safe view of a single message with sender/recipient aliases and redacted content
+- `/email show raw <message_id>` is the explicit escape hatch for the raw message body and raw participants
+- natural-language email search/show routes through the same read-only Core interface
+- sender identity is shown as a safe alias; full sender names and email addresses are Core-private
+- `ContactDirectory` persists raw contact identity locally in Postgres while exposing only safe aliases to Robe/LLM contexts
+- Postgres includes `email_accounts` as the durable foundation for future multi-account scheduler configuration
+- LLM-proposed contact relationship/category updates are validated by Core before persistence
+- `EmailReviewService` can run unread/unreviewed review in dry-run mode and audit proposed labels before any scheduler is enabled
+- Gmail messages include a web link so Telegram can open the message in an already-authenticated browser or mobile Gmail session
+- no email sending, deletion, archiving or unsubscribe execution is implemented
+- label mutation is limited to controlled `Robe/...` labels for the future review workflow and must remain Core-owned
+- future email summarization must pass email content and sender identity through Core sanitization/redaction before LLM use
 
 Current Memory policy:
 
@@ -441,7 +513,7 @@ Calendar event creation and deletion with explicit confirmation tokens.
 
 ### v0.4
 
-Gmail read-only search and thread summarization.
+Gmail search/show, controlled review labels and thread summarization.
 
 ### v0.5
 

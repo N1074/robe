@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -13,9 +14,13 @@ const (
 	ActionMemoryTag      = "memory.tag"
 	ActionCalendarCreate = "calendar.create"
 	ActionCalendarDelete = "calendar.delete"
+	ActionEmailLabel     = "email.label"
+	ActionContactProfile = "contact.profile"
 
 	ResourceMemory   = "memory"
 	ResourceCalendar = "calendar"
+	ResourceEmail    = "email"
+	ResourceContact  = "contact"
 
 	ActorUser       = "user"
 	ActorLLM        = "llm"
@@ -86,6 +91,10 @@ func (DefaultPermissionEngine) Decide(action Action) PermissionDecision {
 		return PermissionDecision{RiskLevel: RiskMedium, Decision: DecisionAllow, Reason: "memory curation is a local reversible write"}
 	case ActionCalendarCreate, ActionCalendarDelete:
 		return PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionConfirm, Reason: "calendar writes are external side effects"}
+	case ActionEmailLabel:
+		return PermissionDecision{RiskLevel: RiskMedium, Decision: DecisionAllow, Reason: "email labels are reversible mailbox curation"}
+	case ActionContactProfile:
+		return PermissionDecision{RiskLevel: RiskMedium, Decision: DecisionAllow, Reason: "contact profile curation is local reversible metadata"}
 	default:
 		return PermissionDecision{RiskLevel: RiskHigh, Decision: DecisionDeny, Reason: "unknown action type"}
 	}
@@ -179,4 +188,52 @@ func calendarAction(actionType string, token string, eventID string) Action {
 		Summary:      "calendar " + strings.TrimPrefix(actionType, "calendar."),
 		Metadata:     metadata,
 	}
+}
+
+func emailLabelAction(messageID string, labels []string, dryRun bool) Action {
+	return Action{
+		Type:         ActionEmailLabel,
+		Actor:        ActorAutomation,
+		Source:       "email/review",
+		ResourceType: ResourceEmail,
+		ResourceID:   strings.TrimSpace(messageID),
+		Summary:      "email label review",
+		Metadata: map[string]string{
+			"labels":  strings.Join(labels, ","),
+			"dry_run": boolString(dryRun),
+		},
+	}
+}
+
+func contactProfileAction(contactID string, proposal ContactProfileProposal) Action {
+	return Action{
+		Type:         ActionContactProfile,
+		Actor:        ActorLLM,
+		Source:       "email/llm",
+		ResourceType: ResourceContact,
+		ResourceID:   strings.TrimSpace(contactID),
+		Summary:      "contact profile proposal",
+		Metadata: map[string]string{
+			"alias":        strings.TrimSpace(proposal.Alias),
+			"relationship": strings.TrimSpace(proposal.Relationship),
+			"project":      strings.TrimSpace(proposal.ProjectSlug),
+			"importance":   importanceLabel(proposal.Importance),
+			"confidence":   formatConfidence(proposal.Confidence),
+			"reason":       strings.TrimSpace(proposal.Reason),
+		},
+	}
+}
+
+func boolString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+
+func formatConfidence(value float64) string {
+	if value == 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.2f", value), "0"), ".")
 }

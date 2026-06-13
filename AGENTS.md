@@ -9,7 +9,7 @@ The repository is intended to become a maintainable orchestration layer for priv
 - Telegram input/output
 - local LLM inference through Ollama
 - Google Calendar integration
-- future Gmail read-only integration
+- Gmail search/show and controlled label integration
 - future web search integration
 - confirmation gates for sensitive actions
 - voice/TTS/mobile/glasses bridge
@@ -38,6 +38,7 @@ The current intended version includes:
 - command handling in `internal/core`
 - `/status` reports env, LLM provider/model and Telegram access mode without secrets
 - Google Calendar read/create/delete commands with explicit confirmation for writes
+- Gmail search/show commands and controlled label support
 - natural-language intent routing through the local LLM
 - Telegram voice/audio input through configurable local STT
 - structured local memory backed by Postgres
@@ -45,6 +46,7 @@ The current intended version includes:
 - optional Ollama embeddings for memory-assisted LLM retrieval
 - central Core permission engine
 - PostgreSQL audit events for memory writes and calendar write proposals/execution
+- Core redaction contract for external content before LLM prompt injection
 - local LLM integration through Ollama
 - tested with `qwen3:14b`
 - Makefile with `run`, `fmt`, `test`, `vet`, `check`
@@ -272,7 +274,7 @@ Planned adapters:
 
 - LLM via Ollama
 - Google Calendar
-- Gmail read-only
+- Gmail search/show and controlled labels
 - web search
 - local storage
 - local STT command adapter
@@ -306,7 +308,16 @@ Policy:
 - future tool executions should be auditable
 - current memory writes and calendar write proposals/execution are audited when Postgres is configured
 - new side-effecting tools must use the Core permission engine and audit event model instead of inventing local policy
-- PII redaction should be introduced before email/RAG/task ingestion uses external content for memory, prompt injection or indexing
+- external content destined for LLM prompt injection must pass through Core redaction
+- Gmail natural-language commands are read-only in early versions; sending, deletion, archive and unsubscribe execution are not implemented
+- Gmail label mutation is reserved for Core-owned review workflows and must be validated and audited before automatic use
+- Gmail review labels must stay controlled under `Robe/...`; project-specific or user-specific labels should come from database-backed rules, not free-form LLM output
+- raw email sender names and addresses are Core-private; prompts, summaries and normal Robe responses should use safe aliases such as `Maria S. B.`
+- `/email show` is safe by default; raw message display requires `/email show raw <message_id>`
+- contact relationship/category proposals from the LLM must be validated by Core before writing to `ContactDirectory`
+- email review automation must start in dry-run mode with audit records before any scheduler is enabled
+- `CONTACT_ENCRYPTION_KEY` enables encrypted storage for `contact_addresses.email`; without it, raw email addresses should not be persisted in that column
+- durable multi-account email configuration belongs in Postgres `email_accounts`, not hardcoded adapter state
 
 Confirmation flow should eventually look like:
 
@@ -332,6 +343,11 @@ Current commands:
 - `/calendar week`
 - `/calendar create <title> | <start> | <end> [| location] [| description]`
 - `/calendar delete <event_id>`
+- `/email search <query>`
+- `/email show <message_id>`
+- `/email show raw <message_id>`
+- `/email review dry-run`
+- natural-language email search/show intents parsed by the LLM
 - `/pending`
 - `/confirm <token>`
 - `/cancel <token>`
@@ -352,6 +368,7 @@ Current commands:
 - side-effecting actions are classified by the Core permission engine
 - audit events are written through a Core-owned `AuditLogger`
 - Postgres persists audit events in `audit_events` when the Postgres store is configured
+- `RedactExternalContentForPrompt` is the Core-owned redaction contract for future email, web and RAG content before LLM prompt injection
 
 Core tests should continue to cover:
 
@@ -372,6 +389,7 @@ Core tests should continue to cover:
 - `/pending`
 - natural-language calendar create intent without execution
 - natural-language calendar list intent
+- natural-language email search/show intent with mock Email
 - `/remember` with mock MemoryStore
 - `/memories` with mock MemoryStore
 - `/memory show/tag/archive` with mock MemoryStore
@@ -429,7 +447,7 @@ v0.3.1:
 
 v0.4:
 
-- Gmail read-only search and summarization
+- Gmail search/show, controlled review labels and summarization
 
 v0.5:
 

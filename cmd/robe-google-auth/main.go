@@ -9,25 +9,32 @@ import (
 	"strings"
 
 	calendaradapter "github.com/N1074/robe/internal/adapters/calendar"
+	gmailadapter "github.com/N1074/robe/internal/adapters/gmail"
 	"github.com/N1074/robe/internal/config"
 )
 
 func main() {
 	cfg := config.Load()
 
-	if cfg.CalendarCredentialsFile == "" {
-		log.Fatal("CALENDAR_CREDENTIALS_FILE is required")
-	}
-	if cfg.CalendarTokenFile == "" {
-		log.Fatal("CALENDAR_TOKEN_FILE is required")
+	target := strings.TrimSpace(os.Getenv("GOOGLE_AUTH_TARGET"))
+	if target == "" {
+		target = "calendar"
 	}
 
-	url, err := calendaradapter.AuthURL(cfg.CalendarCredentialsFile)
+	credentialsFile, tokenFile, label := googleAuthFiles(cfg, target)
+	if credentialsFile == "" {
+		log.Fatalf("%s credentials file is required", label)
+	}
+	if tokenFile == "" {
+		log.Fatalf("%s token file is required", label)
+	}
+
+	url, err := googleAuthURL(target, credentialsFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Open this URL, approve Calendar access, then paste the authorization code:")
+	fmt.Printf("Open this URL, approve %s access, then paste the authorization code:\n", label)
 	fmt.Println(url)
 	fmt.Print("Code: ")
 
@@ -37,9 +44,43 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := calendaradapter.ExchangeCode(context.Background(), cfg.CalendarCredentialsFile, cfg.CalendarTokenFile, strings.TrimSpace(code)); err != nil {
+	if err := googleExchangeCode(context.Background(), target, credentialsFile, tokenFile, strings.TrimSpace(code)); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Token saved to " + cfg.CalendarTokenFile)
+	fmt.Println("Token saved to " + tokenFile)
+}
+
+func googleAuthFiles(cfg config.Config, target string) (string, string, string) {
+	switch target {
+	case "calendar":
+		return cfg.CalendarCredentialsFile, cfg.CalendarTokenFile, "Calendar"
+	case "gmail":
+		return cfg.GmailCredentialsFile, cfg.GmailTokenFile, "Gmail modify"
+	default:
+		log.Fatalf("unsupported GOOGLE_AUTH_TARGET %q; use calendar or gmail", target)
+		return "", "", ""
+	}
+}
+
+func googleAuthURL(target string, credentialsFile string) (string, error) {
+	switch target {
+	case "calendar":
+		return calendaradapter.AuthURL(credentialsFile)
+	case "gmail":
+		return gmailadapter.AuthURL(credentialsFile)
+	default:
+		return "", fmt.Errorf("unsupported GOOGLE_AUTH_TARGET %q", target)
+	}
+}
+
+func googleExchangeCode(ctx context.Context, target string, credentialsFile string, tokenFile string, code string) error {
+	switch target {
+	case "calendar":
+		return calendaradapter.ExchangeCode(ctx, credentialsFile, tokenFile, code)
+	case "gmail":
+		return gmailadapter.ExchangeCode(ctx, credentialsFile, tokenFile, code)
+	default:
+		return fmt.Errorf("unsupported GOOGLE_AUTH_TARGET %q", target)
+	}
 }

@@ -25,14 +25,20 @@ type Config struct {
 	CalendarTokenFile       string
 	CalendarTimezone        string
 
+	EmailProvider        string
+	GmailCredentialsFile string
+	GmailTokenFile       string
+	GmailUserID          string
+
 	STTProvider       string
 	STTCommand        string
 	STTArgs           []string
 	STTTimeoutSeconds int
 
-	MemoryProvider string
-	DatabaseURL    string
-	ProjectAliases map[string]string
+	MemoryProvider       string
+	DatabaseURL          string
+	ProjectAliases       map[string]string
+	ContactEncryptionKey string
 
 	EmbeddingProvider string
 	EmbeddingBaseURL  string
@@ -61,14 +67,20 @@ func Load() Config {
 		CalendarTokenFile:       os.Getenv("CALENDAR_TOKEN_FILE"),
 		CalendarTimezone:        getenv("CALENDAR_TIMEZONE", "Europe/Madrid"),
 
+		EmailProvider:        getenv("EMAIL_PROVIDER", ""),
+		GmailCredentialsFile: os.Getenv("GMAIL_CREDENTIALS_FILE"),
+		GmailTokenFile:       os.Getenv("GMAIL_TOKEN_FILE"),
+		GmailUserID:          getenv("GMAIL_USER_ID", "me"),
+
 		STTProvider:       getenv("STT_PROVIDER", ""),
 		STTCommand:        os.Getenv("STT_COMMAND"),
 		STTArgs:           splitArgs(os.Getenv("STT_ARGS")),
 		STTTimeoutSeconds: getenvInt("STT_TIMEOUT_SECONDS", 120),
 
-		MemoryProvider: getenv("MEMORY_PROVIDER", ""),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		ProjectAliases: parseProjectAliases(os.Getenv("MEMORY_PROJECT_ALIASES")),
+		MemoryProvider:       getenv("MEMORY_PROVIDER", ""),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		ProjectAliases:       parseProjectAliases(os.Getenv("MEMORY_PROJECT_ALIASES")),
+		ContactEncryptionKey: os.Getenv("CONTACT_ENCRYPTION_KEY"),
 
 		EmbeddingProvider: getenv("EMBEDDING_PROVIDER", ""),
 		EmbeddingBaseURL:  getenv("EMBEDDING_BASE_URL", getenv("LLM_BASE_URL", "http://localhost:11434")),

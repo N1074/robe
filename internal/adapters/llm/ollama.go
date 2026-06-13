@@ -265,6 +265,83 @@ func (c *OllamaClient) ParseIntent(ctx context.Context, req core.IntentRequest) 
 	return decodeIntent(stripThinking(out.Message.Content))
 }
 
+func (c *OllamaClient) ClassifyEmail(ctx context.Context, req core.EmailClassificationRequest) (core.EmailClassification, error) {
+	if strings.TrimSpace(req.Prompt) == "" {
+		return core.EmailClassification{}, errors.New("email classification prompt is empty")
+	}
+
+	reqBody := chatRequest{
+		Model: c.model,
+		Messages: []chatMessage{
+			{
+				Role: "system",
+				Content: `You classify email for Robe. Return only compact JSON. No markdown.
+
+Allowed labels:
+- Robe/Reviewed
+- Robe/Important
+- Robe/NeedsAttention
+- Robe/Category/Admin
+- Robe/Category/People
+- Robe/Category/OnlinePurchases
+- Robe/Category/Finance
+- Robe/Category/Projects
+- Robe/Category/Notifications
+- Robe/Category/Other
+
+Rules:
+- Never include raw email addresses, secrets, or full surnames.
+- Use only allowed labels.
+- Always include Robe/Reviewed.
+- Set important true only for admin, legal, finance, urgent human, or time-sensitive messages.
+- Contact proposal is optional and must use sanitized alias only.
+- Contact kind must be person, organization, service, or unknown.
+- Relationship must be admin, supplier, client, personal, project, newsletter, online_purchase, or unknown.
+
+JSON shape:
+{"labels":["Robe/Reviewed","Robe/Category/Admin"],"important":true,"summary":"...","contact":{"kind":"organization","relationship":"admin","importance":4,"confidence":0.8,"reason":"..."}}`,
+			},
+			{
+				Role:    "user",
+				Content: "/no_think\n" + req.Prompt,
+			},
+		},
+		Stream: false,
+		Options: chatOptions{
+			NumPredict:  c.numPredict,
+			Temperature: 0,
+		},
+	}
+
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return core.EmailClassification{}, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/chat", bytes.NewReader(payload))
+	if err != nil {
+		return core.EmailClassification{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return core.EmailClassification{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return core.EmailClassification{}, fmt.Errorf("ollama returned status %d", resp.StatusCode)
+	}
+
+	var out chatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return core.EmailClassification{}, err
+	}
+
+	return decodeEmailClassification(stripThinking(out.Message.Content))
+}
+
 func (c *OllamaClient) intentSystemPrompt() string {
 	return c.readPrompt("system_intent.txt", `You are Robe's intent parser. Return only compact JSON. No markdown.
 
@@ -273,6 +350,8 @@ Supported actions:
 - calendar_create: user asks to create an appointment/event. Fill title, start, end, location, description. If duration/end is missing, use one hour. Resolve relative dates from Now and Timezone.
 - calendar_delete: user asks to delete a calendar event only when an explicit event id is present. Fill event_id.
 - create_memory: user explicitly asks Robe to remember durable context. Strong signals include "remember that", "recuerda que", "ten en cuenta que", "from now on", "de ahora en adelante", "a partir de ahora". Fill memory fields.
+- email_search: user asks to find/search/read emails by sender, subject, topic, date words, or Gmail query terms. Fill query.
+- email_show: user asks to show/open a specific email only when an explicit message_id is present. Fill message_id.
 - ask: ordinary assistant question.
 - none: empty or unclear.
 
@@ -283,12 +362,16 @@ Rules:
 - Memory project should be "global" unless the user clearly mentions a configured project hint.
 - Memory kind must be one of: preference, fact, decision, constraint, task_context, contact_context, operational_note.
 - Never invent an event_id for deletion.
+- Never invent a message_id for email_show; use email_search when no explicit message_id is present.
+- Email actions are read-only.
 - Times must be RFC3339.
 - JSON shape:
 {"action":"calendar_create","title":"Dentist","start":"2026-06-07T12:00:00+02:00","end":"2026-06-07T13:00:00+02:00","location":"","description":""}
 {"action":"calendar_delete","event_id":"abc123"}
 {"action":"create_memory","text":"User prefers concise technical answers.","project":"global","kind":"preference","tags":["communication"],"importance":4,"confidence":0.9}
 {"action":"calendar_list","period":"today"}
+{"action":"email_search","query":"from:sender@example.com invoice"}
+{"action":"email_show","message_id":"18fabc123"}
 {"action":"ask","prompt":"..."}
 {"action":"none"}`)
 }
@@ -328,12 +411,53 @@ type intentResponse struct {
 	Location    string   `json:"location"`
 	Description string   `json:"description"`
 	EventID     string   `json:"event_id"`
+	Query       string   `json:"query"`
+	MessageID   string   `json:"message_id"`
 	Text        string   `json:"text"`
 	Project     string   `json:"project"`
 	Kind        string   `json:"kind"`
 	Tags        []string `json:"tags"`
 	Importance  int      `json:"importance"`
 	Confidence  float64  `json:"confidence"`
+}
+
+type emailClassificationResponse struct {
+	Labels    []string `json:"labels"`
+	Important bool     `json:"important"`
+	Summary   string   `json:"summary"`
+	Contact   struct {
+		Alias        string  `json:"alias"`
+		Kind         string  `json:"kind"`
+		Relationship string  `json:"relationship"`
+		Project      string  `json:"project"`
+		Importance   int     `json:"importance"`
+		Confidence   float64 `json:"confidence"`
+		Reason       string  `json:"reason"`
+	} `json:"contact"`
+}
+
+func decodeEmailClassification(content string) (core.EmailClassification, error) {
+	content = extractJSONObject(content)
+
+	var parsed emailClassificationResponse
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		return core.EmailClassification{}, err
+	}
+
+	return core.EmailClassification{
+		Labels:    parsed.Labels,
+		Important: parsed.Important,
+		Summary:   strings.TrimSpace(parsed.Summary),
+		ContactProposal: core.ContactProfileProposal{
+			Alias:        strings.TrimSpace(parsed.Contact.Alias),
+			Kind:         strings.TrimSpace(parsed.Contact.Kind),
+			Relationship: strings.TrimSpace(parsed.Contact.Relationship),
+			ProjectSlug:  strings.TrimSpace(parsed.Contact.Project),
+			Importance:   parsed.Contact.Importance,
+			Confidence:   parsed.Contact.Confidence,
+			Reason:       strings.TrimSpace(parsed.Contact.Reason),
+		},
+	}, nil
 }
 
 func decodeIntent(content string) (core.Intent, error) {
@@ -392,6 +516,18 @@ func decodeIntent(content string) (core.Intent, error) {
 				Confidence: parsed.Confidence,
 				Status:     "active",
 			},
+		}, nil
+
+	case core.IntentEmailSearch:
+		return core.Intent{
+			Kind:       core.IntentEmailSearch,
+			EmailQuery: strings.TrimSpace(parsed.Query),
+		}, nil
+
+	case core.IntentEmailShow:
+		return core.Intent{
+			Kind:           core.IntentEmailShow,
+			EmailMessageID: strings.TrimSpace(parsed.MessageID),
 		}, nil
 
 	case core.IntentAsk:

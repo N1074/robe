@@ -41,3 +41,48 @@ func TestCosineSimilarity(t *testing.T) {
 		t.Fatalf("expected orthogonal similarity 0, got %f", orthogonal)
 	}
 }
+
+func TestEmailHashNormalizesCaseAndSpace(t *testing.T) {
+	a := emailHash(" Sender@Example.com ")
+	b := emailHash("sender@example.com")
+
+	if a == "" || a != b {
+		t.Fatalf("expected normalized email hashes to match: %q %q", a, b)
+	}
+}
+
+func TestNormalizeProjectSlugStorage(t *testing.T) {
+	if got := normalizeProjectSlugStorage("My_Project"); got != "my-project" {
+		t.Fatalf("unexpected project slug: %q", got)
+	}
+	if got := normalizeProjectSlugStorage("global"); got != "" {
+		t.Fatalf("expected global to normalize empty, got %q", got)
+	}
+}
+
+func TestEncryptContactEmail(t *testing.T) {
+	store := &PostgresMemoryStore{contactEncryptionKey: deriveContactEncryptionKey("test-secret")}
+
+	encrypted, err := store.encryptContactEmail("sender@example.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if encrypted == "" || encrypted == "sender@example.com" {
+		t.Fatalf("expected encrypted value, got %q", encrypted)
+	}
+	if got := store.decryptContactEmail(encrypted); got != "sender@example.com" {
+		t.Fatalf("expected decrypted email, got %q", got)
+	}
+}
+
+func TestEncryptContactEmailWithoutKeyStoresNoRawEmail(t *testing.T) {
+	store := &PostgresMemoryStore{}
+
+	encrypted, err := store.encryptContactEmail("sender@example.com")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if encrypted != "" {
+		t.Fatalf("expected no stored raw email without key, got %q", encrypted)
+	}
+}

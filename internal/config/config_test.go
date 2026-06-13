@@ -76,6 +76,28 @@ func TestLoadCalendarDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadEmailDefaults(t *testing.T) {
+	t.Setenv("EMAIL_PROVIDER", "")
+	t.Setenv("GMAIL_CREDENTIALS_FILE", "")
+	t.Setenv("GMAIL_TOKEN_FILE", "")
+	t.Setenv("GMAIL_USER_ID", "")
+
+	cfg := Load()
+
+	if cfg.EmailProvider != "" {
+		t.Fatalf("expected empty email provider, got %q", cfg.EmailProvider)
+	}
+	if cfg.GmailCredentialsFile != "" {
+		t.Fatalf("expected empty gmail credentials file, got %q", cfg.GmailCredentialsFile)
+	}
+	if cfg.GmailTokenFile != "" {
+		t.Fatalf("expected empty gmail token file, got %q", cfg.GmailTokenFile)
+	}
+	if cfg.GmailUserID != "me" {
+		t.Fatalf("expected default gmail user id me, got %q", cfg.GmailUserID)
+	}
+}
+
 func TestSplitArgs(t *testing.T) {
 	got := splitArgs("--language es --file={audio}")
 	want := []string{"--language", "es", "--file={audio}"}
@@ -125,6 +147,7 @@ func TestLoadMemoryDefaults(t *testing.T) {
 	t.Setenv("MEMORY_PROVIDER", "")
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("MEMORY_PROJECT_ALIASES", "")
+	t.Setenv("CONTACT_ENCRYPTION_KEY", "")
 	t.Setenv("EMBEDDING_PROVIDER", "")
 	t.Setenv("EMBEDDING_BASE_URL", "")
 	t.Setenv("EMBEDDING_MODEL", "")
@@ -139,6 +162,9 @@ func TestLoadMemoryDefaults(t *testing.T) {
 	}
 	if len(cfg.ProjectAliases) != 0 {
 		t.Fatalf("expected empty project aliases, got %#v", cfg.ProjectAliases)
+	}
+	if cfg.ContactEncryptionKey != "" {
+		t.Fatalf("expected empty contact encryption key, got %q", cfg.ContactEncryptionKey)
 	}
 	if cfg.EmbeddingProvider != "" {
 		t.Fatalf("expected empty embedding provider, got %q", cfg.EmbeddingProvider)

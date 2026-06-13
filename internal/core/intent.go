@@ -14,6 +14,8 @@ const (
 	IntentCalendarCreate = "calendar_create"
 	IntentCalendarDelete = "calendar_delete"
 	IntentMemoryCreate   = "create_memory"
+	IntentEmailSearch    = "email_search"
+	IntentEmailShow      = "email_show"
 )
 
 type IntentParser interface {
@@ -34,6 +36,8 @@ type Intent struct {
 	CalendarDraft   CalendarEventDraft
 	CalendarEventID string
 	MemoryDraft     Memory
+	EmailQuery      string
+	EmailMessageID  string
 }
 
 func (a *Assistant) handleNaturalText(ctx context.Context, text string) (string, error) {
@@ -71,6 +75,16 @@ func (a *Assistant) handleIntent(ctx context.Context, intent Intent, originalTex
 
 	case IntentMemoryCreate:
 		return a.handleMemoryCreateIntent(ctx, intent.MemoryDraft, originalText)
+
+	case IntentEmailSearch:
+		query := strings.TrimSpace(intent.EmailQuery)
+		if query == "" {
+			query = originalText
+		}
+		return a.searchEmail(ctx, query)
+
+	case IntentEmailShow:
+		return a.showEmail(ctx, intent.EmailMessageID)
 
 	case IntentAsk, IntentNone, "":
 		prompt := strings.TrimSpace(intent.AskPrompt)

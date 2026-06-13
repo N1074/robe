@@ -21,11 +21,109 @@ func (m mockLLM) Ask(ctx context.Context, prompt string) (string, error) {
 	return m.answer, m.err
 }
 
+type mockLLMWithEmailClassifier struct {
+	mockLLM
+	mockEmailClassifier
+}
+
+type mockEmailClassifier struct {
+	classification EmailClassification
+	err            error
+	lastPrompt     string
+}
+
+func (m *mockEmailClassifier) ClassifyEmail(ctx context.Context, req EmailClassificationRequest) (EmailClassification, error) {
+	m.lastPrompt = req.Prompt
+	return m.classification, m.err
+}
+
 type mockCalendar struct {
 	events       []CalendarEvent
 	lastQuery    CalendarQuery
 	createdCount int
 	deletedID    string
+}
+
+type mockEmail struct {
+	messages      []EmailMessage
+	lastQuery     EmailQuery
+	lastID        string
+	labels        map[string]EmailLabel
+	appliedLabels map[string][]string
+}
+
+func (m *mockEmail) SearchEmails(ctx context.Context, query EmailQuery) ([]EmailMessage, error) {
+	m.lastQuery = query
+	return m.messages, nil
+}
+
+func (m *mockEmail) GetEmail(ctx context.Context, id string) (EmailMessage, error) {
+	m.lastID = id
+	for _, message := range m.messages {
+		if message.ID == id {
+			return message, nil
+		}
+	}
+	return EmailMessage{}, errors.New("email not found")
+}
+
+func (m *mockEmail) SearchUnreadUnreviewedEmails(ctx context.Context, reviewedLabel string, limit int) ([]EmailMessage, error) {
+	m.lastQuery = EmailQuery{Query: "is:unread -" + reviewedLabel, Limit: limit}
+	return m.messages, nil
+}
+
+func (m *mockEmail) EnsureEmailLabel(ctx context.Context, name string) (EmailLabel, error) {
+	if m.labels == nil {
+		m.labels = map[string]EmailLabel{}
+	}
+	if label, ok := m.labels[name]; ok {
+		return label, nil
+	}
+	label := EmailLabel{ID: "label_" + strings.ReplaceAll(strings.ToLower(name), "/", "_"), Name: name}
+	m.labels[name] = label
+	return label, nil
+}
+
+func (m *mockEmail) ApplyEmailLabels(ctx context.Context, messageID string, labelIDs []string) error {
+	if m.appliedLabels == nil {
+		m.appliedLabels = map[string][]string{}
+	}
+	m.appliedLabels[messageID] = append(m.appliedLabels[messageID], labelIDs...)
+	return nil
+}
+
+type mockContactDirectory struct {
+	contacts []Contact
+	proposal ContactProfileProposal
+}
+
+func (m *mockContactDirectory) UpsertEmailContact(ctx context.Context, identity EmailIdentity) (Contact, error) {
+	contact := Contact{
+		ID:           "contact_1",
+		Alias:        identity.Alias,
+		FullName:     identity.RawName,
+		Email:        identity.RawEmail,
+		Kind:         normalizeContactKind(identity.Kind),
+		Relationship: ContactRelationshipUnknown,
+		Status:       "active",
+	}
+	m.contacts = append(m.contacts, contact)
+	return contact, nil
+}
+
+func (m *mockContactDirectory) ApplyContactProfileProposal(ctx context.Context, proposal ContactProfileProposal) (Contact, error) {
+	m.proposal = proposal
+	contact := Contact{
+		ID:           nonEmpty(proposal.ContactID, "contact_1"),
+		Alias:        proposal.Alias,
+		Kind:         normalizeContactKind(proposal.Kind),
+		Relationship: normalizeContactRelationship(proposal.Relationship),
+		ProjectSlug:  normalizeProjectSlug(proposal.ProjectSlug),
+		Importance:   defaultImportance(proposal.Importance),
+		Status:       "active",
+	}
+	m.contacts = append(m.contacts, contact)
+	return contact, nil
 }
 
 func (m *mockCalendar) ListEvents(ctx context.Context, query CalendarQuery) ([]CalendarEvent, error) {
@@ -213,13 +311,4 @@ func fixedTime(t *testing.T, value string) time.Time {
 		t.Fatal(err)
 	}
 	return parsed
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

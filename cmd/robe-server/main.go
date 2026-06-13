@@ -11,6 +11,7 @@ import (
 	"time"
 
 	calendaradapter "github.com/N1074/robe/internal/adapters/calendar"
+	gmailadapter "github.com/N1074/robe/internal/adapters/gmail"
 	"github.com/N1074/robe/internal/adapters/llm"
 	"github.com/N1074/robe/internal/adapters/storage"
 	"github.com/N1074/robe/internal/adapters/stt"
@@ -61,6 +62,23 @@ func main() {
 		logger.Warn("unsupported calendar provider", "provider", cfg.CalendarProvider)
 	}
 
+	var emailClient core.Email
+	if cfg.EmailProvider == "gmail" {
+		client, err := gmailadapter.NewGoogleGmail(ctx, gmailadapter.GoogleConfig{
+			CredentialsFile: cfg.GmailCredentialsFile,
+			TokenFile:       cfg.GmailTokenFile,
+			UserID:          cfg.GmailUserID,
+		})
+		if err != nil {
+			logger.Error("failed to configure gmail", "error", err)
+		} else {
+			emailClient = client
+			logger.Info("gmail configured", "user_id", cfg.GmailUserID)
+		}
+	} else if cfg.EmailProvider != "" {
+		logger.Warn("unsupported email provider", "provider", cfg.EmailProvider)
+	}
+
 	var transcribe telegram.TranscribeFunc
 	if cfg.STTProvider == "command" {
 		transcriber := stt.NewCommandTranscriber(cfg.STTCommand, cfg.STTArgs, time.Duration(cfg.STTTimeoutSeconds)*time.Second)
@@ -72,14 +90,18 @@ func main() {
 
 	var memoryStore core.MemoryStore
 	var auditLogger core.AuditLogger
+	var contactDirectory core.ContactDirectory
 	if cfg.MemoryProvider == "postgres" {
-		store, err := storage.NewPostgresMemoryStore(ctx, cfg.DatabaseURL)
+		store, err := storage.NewPostgresMemoryStoreWithOptions(ctx, cfg.DatabaseURL, storage.Options{
+			ContactEncryptionKey: cfg.ContactEncryptionKey,
+		})
 		if err != nil {
 			logger.Error("failed to configure memory store", "error", err)
 		} else {
 			defer store.Close()
 			memoryStore = store
 			auditLogger = store
+			contactDirectory = store
 			logger.Info("postgres memory configured")
 		}
 	} else if cfg.MemoryProvider != "" {
@@ -100,11 +122,12 @@ func main() {
 		LLMModel:          cfg.LLMModel,
 		AccessRestricted:  cfg.TelegramAllowedUserID != "",
 		CalendarEnabled:   calendarClient != nil,
+		EmailEnabled:      emailClient != nil,
 		VoiceEnabled:      transcribe != nil,
 		MemoryEnabled:     memoryStore != nil,
 		EmbeddingsEnabled: embedder != nil,
 		Timezone:          cfg.CalendarTimezone,
-	}, core.WithCalendar(calendarClient), core.WithMemory(memoryStore), core.WithEmbedder(embedder), core.WithProjectAliases(cfg.ProjectAliases), core.WithAuditLogger(auditLogger))
+	}, core.WithCalendar(calendarClient), core.WithEmail(emailClient), core.WithMemory(memoryStore), core.WithEmbedder(embedder), core.WithProjectAliases(cfg.ProjectAliases), core.WithAuditLogger(auditLogger), core.WithContactDirectory(contactDirectory))
 
 	if cfg.TelegramBotToken != "" {
 		bot, err := telegram.New(cfg.TelegramBotToken, cfg.TelegramAllowedUserID, assistant.HandleText, transcribe, logger)

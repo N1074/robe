@@ -27,7 +27,7 @@ var (
 	cardNumberPattern     = regexp.MustCompile(`\b(?:\d[ -]*?){13,19}\b`)
 )
 
-func redactForPrompt(text string) string {
+func RedactExternalContentForPrompt(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -53,6 +53,10 @@ func redactForPrompt(text string) string {
 	text = phonePattern.ReplaceAllStringFunc(text, redactPhoneNumber)
 
 	return text
+}
+
+func redactForPrompt(text string) string {
+	return RedactExternalContentForPrompt(text)
 }
 
 func redactCardNumber(value string) string {

@@ -68,6 +68,7 @@ Status: in progress.
 - audit events for memory writes
 - audit events for calendar write proposals, confirmations and cancellations
 - initial deterministic PII redaction before memory prompt injection
+- Core redaction contract for external content before LLM prompt injection
 - broader PII redaction for future external content
 - policy tests for sensitive content
 
@@ -77,11 +78,22 @@ Exit criteria:
 - every current sensitive action creates an audit record
 - redaction is applied before prompt injection for external content
 
-## Phase 5: Email Read-Only
+## Phase 5: Email Review
 
-Status: planned.
+Status: in progress.
 
-- Gmail read-only adapter
+- Gmail adapter with search/show and controlled label support
+- Gmail search/show commands
+- natural-language email search/show intents
+- unread/unreviewed search and label primitives
+- controlled Robe email review label taxonomy
+- Core-private raw sender identity with Robe-facing safe aliases
+- safe `/email show` with explicit raw escape hatch
+- Postgres contact directory for raw identity and validated relationship metadata
+- encrypted `contact_addresses.email` storage when `CONTACT_ENCRYPTION_KEY` is configured
+- Postgres `email_accounts` foundation for multi-account review scheduling
+- LLM-proposed contact profile updates validated by Core
+- email review dry-run with audit records
 - email classification
 - summarization
 - task/memory proposals only
@@ -91,8 +103,11 @@ Status: planned.
 Exit criteria:
 
 - email content redacted before LLM use where practical
-- no email side effects without confirmation
+- sender email addresses and full surnames hidden from LLM context by default
+- no email send/delete/archive/unsubscribe without explicit confirmation or later policy
+- controlled label mutation is reversible, Core-owned and audited
 - audit records for email-derived proposals
+- scheduler remains disabled until dry-run review has been inspected
 
 ## Phase 6: RAG And Documents
 

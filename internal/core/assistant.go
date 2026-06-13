@@ -16,21 +16,24 @@ type Embedder interface {
 }
 
 type Assistant struct {
-	llm             LLM
-	embedder        Embedder
-	intentParser    IntentParser
-	calendar        Calendar
-	memory          MemoryStore
-	permissions     PermissionEngine
-	audit           AuditLogger
-	activeProject   string
-	projectAliases  map[string]string
-	status          Status
-	location        *time.Location
-	pendingTTL      time.Duration
-	pendingCalendar *pendingCalendarStore
-	now             func() time.Time
-	tokenGenerator  func(prefix string) (string, error)
+	llm              LLM
+	embedder         Embedder
+	intentParser     IntentParser
+	emailClassifier  EmailClassifier
+	calendar         Calendar
+	email            Email
+	contactDirectory ContactDirectory
+	memory           MemoryStore
+	permissions      PermissionEngine
+	audit            AuditLogger
+	activeProject    string
+	projectAliases   map[string]string
+	status           Status
+	location         *time.Location
+	pendingTTL       time.Duration
+	pendingCalendar  *pendingCalendarStore
+	now              func() time.Time
+	tokenGenerator   func(prefix string) (string, error)
 }
 
 type Status struct {
@@ -39,6 +42,7 @@ type Status struct {
 	LLMModel          string
 	AccessRestricted  bool
 	CalendarEnabled   bool
+	EmailEnabled      bool
 	VoiceEnabled      bool
 	MemoryEnabled     bool
 	EmbeddingsEnabled bool
@@ -74,6 +78,9 @@ func NewAssistant(llm LLM, status Status, opts ...AssistantOption) *Assistant {
 	if parser, ok := llm.(IntentParser); ok {
 		assistant.intentParser = parser
 	}
+	if classifier, ok := llm.(EmailClassifier); ok {
+		assistant.emailClassifier = classifier
+	}
 
 	for _, opt := range opts {
 		opt(assistant)
@@ -86,6 +93,19 @@ func WithCalendar(calendar Calendar) AssistantOption {
 	return func(a *Assistant) {
 		a.calendar = calendar
 		a.status.CalendarEnabled = calendar != nil
+	}
+}
+
+func WithEmail(email Email) AssistantOption {
+	return func(a *Assistant) {
+		a.email = email
+		a.status.EmailEnabled = email != nil
+	}
+}
+
+func WithContactDirectory(directory ContactDirectory) AssistantOption {
+	return func(a *Assistant) {
+		a.contactDirectory = directory
 	}
 }
 
@@ -112,6 +132,12 @@ func WithProjectAliases(aliases map[string]string) AssistantOption {
 func WithIntentParser(parser IntentParser) AssistantOption {
 	return func(a *Assistant) {
 		a.intentParser = parser
+	}
+}
+
+func WithEmailClassifier(classifier EmailClassifier) AssistantOption {
+	return func(a *Assistant) {
+		a.emailClassifier = classifier
 	}
 }
 
@@ -145,7 +171,7 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 		return "Robe v0.1 online. Try /ping or /ask <question>.", nil
 
 	case text == "/help":
-		return "Commands:\n/ping\n/status\n/ask <question>\n/askmem <memory query> | <question>\n/remember <text>\n/memories <query>\n/forget <memory_id>\n/memory show|archive|tag\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/pending\n/confirm <token>\n/cancel <token>", nil
+		return "Commands:\n/ping\n/status\n/ask <question>\n/askmem <memory query> | <question>\n/remember <text>\n/memories <query>\n/forget <memory_id>\n/memory show|archive|tag\n/project list|create|use|status\n/calendar today|tomorrow|week\n/calendar create <title> | <start> | <end> [| location] [| description]\n/calendar delete <event_id>\n/email search <query>\n/email show <message_id>\n/email show raw <message_id>\n/email review dry-run\n/pending\n/confirm <token>\n/cancel <token>", nil
 
 	case text == "/status":
 		return a.renderStatus(), nil
@@ -173,6 +199,9 @@ func (a *Assistant) HandleText(ctx context.Context, text string) (string, error)
 
 	case text == "/calendar" || strings.HasPrefix(text, "/calendar "):
 		return a.handleCalendar(ctx, text)
+
+	case text == "/email" || strings.HasPrefix(text, "/email "):
+		return a.handleEmail(ctx, text)
 
 	case text == "/pending":
 		return a.handlePending()
@@ -214,6 +243,11 @@ func (a *Assistant) renderStatus() string {
 		calendar = "enabled"
 	}
 
+	email := "disabled"
+	if a.status.EmailEnabled {
+		email = "enabled"
+	}
+
 	voice := "disabled"
 	if a.status.VoiceEnabled {
 		voice = "enabled"
@@ -239,7 +273,7 @@ func (a *Assistant) renderStatus() string {
 		project = "global"
 	}
 
-	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nVoice: " + voice + "\nMemory: " + memory + "\nEmbeddings: " + embeddings + "\nProject: " + project + "\nTimezone: " + timezone
+	return "Robe v0.1 online.\nEnv: " + env + "\nLLM: " + provider + "/" + model + "\nAccess: " + access + "\nCalendar: " + calendar + "\nEmail: " + email + "\nVoice: " + voice + "\nMemory: " + memory + "\nEmbeddings: " + embeddings + "\nProject: " + project + "\nTimezone: " + timezone
 }
 
 func (a *Assistant) handleAsk(ctx context.Context, prompt string) (string, error) {

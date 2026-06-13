@@ -12,6 +12,8 @@ The LLM emits structured proposals. Core validates and executes.
 - `calendar_create`
 - `calendar_delete`
 - `create_memory`
+- `email_search`
+- `email_show`
 
 ## General Rules
 
@@ -45,6 +47,20 @@ Core validates:
 
 If validation fails, Core reports that the memory was not saved.
 
+## Email Actions
+
+Email natural-language actions are read-only in the current protocol.
+
+`email_search` may execute directly for an authorized user. The LLM should fill `query` with a concise Gmail-compatible search query or plain search terms.
+
+`email_show` may execute only when the user provides an explicit message ID. The LLM must not invent message IDs; if no explicit message ID is present, use `email_search` instead.
+
+Email natural-language actions must not send, delete, archive, label or unsubscribe. Future automatic label application belongs to a Core-owned review workflow, not to natural-language intent execution.
+
+Raw sender email addresses and full display names are Core-private. When email content is later summarized or classified by the LLM, Core should provide sanitized sender aliases and redacted content rather than raw identities.
+
+Contact relationship/category proposals may be derived from sanitized aliases and redacted email context. Core must validate the proposal before writing to `ContactDirectory`.
+
 ## Future Actions
 
 Future actions should follow the same shape:
@@ -63,4 +79,3 @@ Before adding a new action:
 - update `docs/ARCHITECTURE_GOVERNANCE.md`
 - update `docs/ROADMAP.md`
 - update relevant LLM traits
-

@@ -81,6 +81,71 @@ func TestHandleTextNaturalAskIntentFallsBackToLLM(t *testing.T) {
 	}
 }
 
+func TestHandleTextNaturalEmailSearchIntent(t *testing.T) {
+	email := &mockEmail{
+		messages: []EmailMessage{
+			{ID: "msg_1", From: "sender@example.com", Subject: "Invoice", Snippet: "June invoice"},
+		},
+	}
+	intentParser := mockIntentParser{
+		intent: Intent{
+			Kind:       IntentEmailSearch,
+			EmailQuery: "from:sender@example.com invoice",
+		},
+	}
+	assistant := NewAssistant(nil, Status{}, WithEmail(email), WithIntentParser(intentParser))
+
+	got, err := assistant.HandleText(context.Background(), "busca correos de sender sobre invoice")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "Email:") || !strings.Contains(got, "[msg_1] Invoice") {
+		t.Fatalf("unexpected response: %q", got)
+	}
+	if email.lastQuery.Query != "from:sender@example.com invoice" {
+		t.Fatalf("unexpected email query: %#v", email.lastQuery)
+	}
+}
+
+func TestHandleTextNaturalEmailSearchFallsBackToOriginalTextWhenQueryMissing(t *testing.T) {
+	email := &mockEmail{}
+	intentParser := mockIntentParser{
+		intent: Intent{Kind: IntentEmailSearch},
+	}
+	assistant := NewAssistant(nil, Status{}, WithEmail(email), WithIntentParser(intentParser))
+
+	if _, err := assistant.HandleText(context.Background(), "busca correos sobre facturas"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if email.lastQuery.Query != "busca correos sobre facturas" {
+		t.Fatalf("expected original text fallback, got %#v", email.lastQuery)
+	}
+}
+
+func TestHandleTextNaturalEmailShowIntentRequiresExplicitID(t *testing.T) {
+	email := &mockEmail{
+		messages: []EmailMessage{{ID: "msg_1", Subject: "Hello", PlainText: "Body"}},
+	}
+	intentParser := mockIntentParser{
+		intent: Intent{
+			Kind:           IntentEmailShow,
+			EmailMessageID: "msg_1",
+		},
+	}
+	assistant := NewAssistant(nil, Status{}, WithEmail(email), WithIntentParser(intentParser))
+
+	got, err := assistant.HandleText(context.Background(), "abre el correo msg_1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !strings.Contains(got, "ID: msg_1") || !strings.Contains(got, "Body") {
+		t.Fatalf("unexpected response: %q", got)
+	}
+}
+
 func TestHandleTextPassesConfiguredProjectHintsToIntentParser(t *testing.T) {
 	intentParser := &recordingIntentParser{
 		intent: Intent{Kind: IntentAsk, AskPrompt: "hello"},

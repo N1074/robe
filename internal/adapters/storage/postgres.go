@@ -2,7 +2,12 @@ package storage
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +21,19 @@ import (
 )
 
 type PostgresMemoryStore struct {
-	db *sql.DB
+	db                   *sql.DB
+	contactEncryptionKey []byte
+}
+
+type Options struct {
+	ContactEncryptionKey string
 }
 
 func NewPostgresMemoryStore(ctx context.Context, databaseURL string) (*PostgresMemoryStore, error) {
+	return NewPostgresMemoryStoreWithOptions(ctx, databaseURL, Options{})
+}
+
+func NewPostgresMemoryStoreWithOptions(ctx context.Context, databaseURL string, opts Options) (*PostgresMemoryStore, error) {
 	databaseURL = strings.TrimSpace(databaseURL)
 	if databaseURL == "" {
 		return nil, errors.New("database url is required")
@@ -34,7 +48,10 @@ func NewPostgresMemoryStore(ctx context.Context, databaseURL string) (*PostgresM
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	store := &PostgresMemoryStore{db: db}
+	store := &PostgresMemoryStore{
+		db:                   db,
+		contactEncryptionKey: deriveContactEncryptionKey(opts.ContactEncryptionKey),
+	}
 	if err := store.Migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -116,6 +133,49 @@ CREATE INDEX IF NOT EXISTS memory_tags_tag_idx ON memory_tags (tag);
 CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx ON audit_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS audit_events_action_type_idx ON audit_events (action_type);
 CREATE INDEX IF NOT EXISTS audit_events_resource_idx ON audit_events (resource_type, resource_id);
+
+CREATE TABLE IF NOT EXISTS contacts (
+	id BIGSERIAL PRIMARY KEY,
+	alias TEXT NOT NULL,
+	full_name TEXT NOT NULL DEFAULT '',
+	kind TEXT NOT NULL DEFAULT 'unknown',
+	relationship TEXT NOT NULL DEFAULT 'unknown',
+	project_slug TEXT NOT NULL DEFAULT '',
+	importance INTEGER NOT NULL DEFAULT 3,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS contact_addresses (
+	contact_id BIGINT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+	address_hash TEXT PRIMARY KEY,
+	email TEXT NOT NULL DEFAULT '',
+	display_name_seen TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS email_accounts (
+	id BIGSERIAL PRIMARY KEY,
+	provider TEXT NOT NULL,
+	account_key TEXT UNIQUE NOT NULL,
+	display_name TEXT NOT NULL DEFAULT '',
+	user_id TEXT NOT NULL DEFAULT '',
+	credentials_file TEXT NOT NULL DEFAULT '',
+	token_file TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'active',
+	autoreview_enabled BOOLEAN NOT NULL DEFAULT false,
+	notify_telegram_enabled BOOLEAN NOT NULL DEFAULT false,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS contacts_alias_idx ON contacts (alias);
+CREATE INDEX IF NOT EXISTS contacts_relationship_idx ON contacts (relationship);
+CREATE INDEX IF NOT EXISTS contact_addresses_contact_idx ON contact_addresses (contact_id);
+CREATE INDEX IF NOT EXISTS email_accounts_provider_idx ON email_accounts (provider);
+CREATE INDEX IF NOT EXISTS email_accounts_status_idx ON email_accounts (status);
 `)
 	return err
 }
@@ -439,6 +499,121 @@ WHERE slug = $1 AND status = 'active'
 	return project, nil
 }
 
+func (s *PostgresMemoryStore) UpsertEmailContact(ctx context.Context, identity core.EmailIdentity) (core.Contact, error) {
+	identity.RawEmail = strings.ToLower(strings.TrimSpace(identity.RawEmail))
+	identity.RawName = strings.TrimSpace(identity.RawName)
+	identity.Alias = strings.TrimSpace(identity.Alias)
+	if identity.Alias == "" {
+		identity.Alias = "Unknown sender"
+	}
+
+	if identity.RawEmail != "" {
+		existing, err := s.contactByEmailHash(ctx, emailHash(identity.RawEmail))
+		if err == nil {
+			return existing, nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return core.Contact{}, err
+		}
+	}
+
+	now := time.Now()
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+INSERT INTO contacts (alias, full_name, kind, relationship, project_slug, importance, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)
+RETURNING id
+`, identity.Alias, identity.RawName, core.ContactKindUnknown, core.ContactRelationshipUnknown, normalizeProjectSlugStorage(identity.ProjectSlug), defaultInt(0, 3), now, now).Scan(&id)
+	if err != nil {
+		return core.Contact{}, err
+	}
+
+	if identity.RawEmail != "" {
+		storedEmail, err := s.encryptContactEmail(identity.RawEmail)
+		if err != nil {
+			return core.Contact{}, err
+		}
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO contact_addresses (contact_id, address_hash, email, display_name_seen, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (address_hash) DO UPDATE SET contact_id = EXCLUDED.contact_id, display_name_seen = EXCLUDED.display_name_seen, updated_at = EXCLUDED.updated_at
+`, id, emailHash(identity.RawEmail), storedEmail, identity.RawName, now, now); err != nil {
+			return core.Contact{}, err
+		}
+	}
+
+	return s.contactByID(ctx, id)
+}
+
+func (s *PostgresMemoryStore) ApplyContactProfileProposal(ctx context.Context, proposal core.ContactProfileProposal) (core.Contact, error) {
+	if err := validateStorageContactProposal(proposal); err != nil {
+		return core.Contact{}, err
+	}
+
+	now := time.Now()
+	if strings.TrimSpace(proposal.ContactID) != "" {
+		id := strings.TrimSpace(proposal.ContactID)
+		_, err := s.db.ExecContext(ctx, `
+UPDATE contacts
+SET alias = COALESCE(NULLIF($2, ''), alias),
+    kind = $3,
+    relationship = $4,
+    project_slug = $5,
+    importance = $6,
+    updated_at = $7
+WHERE id = $1
+`, id, strings.TrimSpace(proposal.Alias), core.NormalizeContactKindForStorage(proposal.Kind), core.NormalizeContactRelationshipForStorage(proposal.Relationship), normalizeProjectSlugStorage(proposal.ProjectSlug), defaultInt(proposal.Importance, 3), now)
+		if err != nil {
+			return core.Contact{}, err
+		}
+		var numericID int64
+		if _, err := fmt.Sscanf(id, "%d", &numericID); err != nil {
+			return core.Contact{}, err
+		}
+		return s.contactByID(ctx, numericID)
+	}
+
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+INSERT INTO contacts (alias, kind, relationship, project_slug, importance, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, 'active', $6, $7)
+RETURNING id
+`, strings.TrimSpace(proposal.Alias), core.NormalizeContactKindForStorage(proposal.Kind), core.NormalizeContactRelationshipForStorage(proposal.Relationship), normalizeProjectSlugStorage(proposal.ProjectSlug), defaultInt(proposal.Importance, 3), now, now).Scan(&id)
+	if err != nil {
+		return core.Contact{}, err
+	}
+	return s.contactByID(ctx, id)
+}
+
+func (s *PostgresMemoryStore) contactByEmailHash(ctx context.Context, hash string) (core.Contact, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `SELECT contact_id FROM contact_addresses WHERE address_hash = $1`, hash).Scan(&id)
+	if err != nil {
+		return core.Contact{}, err
+	}
+	return s.contactByID(ctx, id)
+}
+
+func (s *PostgresMemoryStore) contactByID(ctx context.Context, id int64) (core.Contact, error) {
+	var contact core.Contact
+	var createdAt, updatedAt time.Time
+	err := s.db.QueryRowContext(ctx, `
+SELECT c.id::text, c.alias, c.full_name, COALESCE(ca.email, ''), c.kind, c.relationship, c.project_slug, c.importance, c.status, c.created_at, c.updated_at
+FROM contacts c
+LEFT JOIN contact_addresses ca ON ca.contact_id = c.id
+WHERE c.id = $1
+ORDER BY ca.created_at ASC
+LIMIT 1
+`, id).Scan(&contact.ID, &contact.Alias, &contact.FullName, &contact.Email, &contact.Kind, &contact.Relationship, &contact.ProjectSlug, &contact.Importance, &contact.Status, &createdAt, &updatedAt)
+	if err != nil {
+		return core.Contact{}, err
+	}
+	contact.Email = s.decryptContactEmail(contact.Email)
+	contact.CreatedAt = createdAt
+	contact.UpdatedAt = updatedAt
+	return contact, nil
+}
+
 func (s *PostgresMemoryStore) projectIDBySlug(ctx context.Context, slug string) (any, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -583,4 +758,92 @@ func cosineSimilarity(a []float64, b []float64) float64 {
 	}
 
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+func emailHash(email string) string {
+	email = strings.ToLower(strings.TrimSpace(email))
+	sum := sha256.Sum256([]byte(email))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func validateStorageContactProposal(proposal core.ContactProfileProposal) error {
+	if strings.TrimSpace(proposal.ContactID) == "" && strings.TrimSpace(proposal.Alias) == "" {
+		return errors.New("contact id or alias is required")
+	}
+	return nil
+}
+
+func normalizeProjectSlugStorage(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "-")
+	if value == "global" {
+		return ""
+	}
+	return value
+}
+
+func deriveContactEncryptionKey(secret string) []byte {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return nil
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:]
+}
+
+func (s *PostgresMemoryStore) encryptContactEmail(email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", nil
+	}
+	if len(s.contactEncryptionKey) == 0 {
+		return "", nil
+	}
+
+	block, err := aes.NewCipher(s.contactEncryptionKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nil, nonce, []byte(email), nil)
+	payload := append(nonce, ciphertext...)
+	return "enc:v1:" + base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func (s *PostgresMemoryStore) decryptContactEmail(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "enc:v1:") || len(s.contactEncryptionKey) == 0 {
+		return ""
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, "enc:v1:"))
+	if err != nil {
+		return ""
+	}
+	block, err := aes.NewCipher(s.contactEncryptionKey)
+	if err != nil {
+		return ""
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return ""
+	}
+	if len(payload) < gcm.NonceSize() {
+		return ""
+	}
+	nonce := payload[:gcm.NonceSize()]
+	ciphertext := payload[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return ""
+	}
+	return string(plaintext)
 }

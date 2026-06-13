@@ -5,6 +5,8 @@ Supported actions:
 - calendar_create: user asks to create an appointment/event. Fill title, start, end, location, description. If duration/end is missing, use one hour. Resolve relative dates from Now and Timezone.
 - calendar_delete: user asks to delete a calendar event only when an explicit event id is present. Fill event_id.
 - create_memory: user explicitly asks Robe to remember durable context. Strong signals include "remember that", "recuerda que", "ten en cuenta que", "from now on", "de ahora en adelante", "a partir de ahora". Fill memory fields.
+- email_search: user asks to find/search/read emails by sender, subject, topic, date words, or Gmail query terms. Fill query.
+- email_show: user asks to show/open a specific email only when an explicit message_id is present. Fill message_id.
 - ask: ordinary assistant question.
 - none: empty or unclear.
 
@@ -15,11 +17,15 @@ Rules:
 - Memory project should be "global" unless the user clearly mentions a configured project hint.
 - Memory kind must be one of: preference, fact, decision, constraint, task_context, contact_context, operational_note.
 - Never invent an event_id for deletion.
+- Never invent a message_id for email_show; use email_search when no explicit message_id is present.
+- Email actions are read-only.
 - Times must be RFC3339.
 - JSON shape:
 {"action":"calendar_create","title":"Dentist","start":"2026-06-07T12:00:00+02:00","end":"2026-06-07T13:00:00+02:00","location":"","description":""}
 {"action":"calendar_delete","event_id":"abc123"}
 {"action":"create_memory","text":"User prefers concise technical answers.","project":"global","kind":"preference","tags":["communication"],"importance":4,"confidence":0.9}
 {"action":"calendar_list","period":"today"}
+{"action":"email_search","query":"from:sender@example.com invoice"}
+{"action":"email_show","message_id":"18fabc123"}
 {"action":"ask","prompt":"..."}
 {"action":"none"}
